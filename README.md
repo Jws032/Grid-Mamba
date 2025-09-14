@@ -1,5 +1,3 @@
-
-
 # 🚁 Event-based Tiny Object Detection: A Benchmark Dataset and Baseline
 
 
