@@ -7,7 +7,7 @@ STRUCTURE:
 
 DATA:
   input_channel: 4
-  root: /media/admin1/123/EV-UAV
+  root: /dataset/EV-UAV-dataset
   whole_t: 8000 #ms
   res: [346,260]
 
