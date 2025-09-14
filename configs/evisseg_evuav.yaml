@@ -7,7 +7,7 @@ STRUCTURE:
 
 DATA:
   input_channel: 4
-  root: /dataset/EV-UAV-dataset
+  root: dataset/EV-UAV-dataset
   whole_t: 8000 #ms
   res: [346,260]
 
@@ -20,7 +20,7 @@ TRAIN:
   k: 3
   t: 5
   max_events_num : 700000
-  model_save_root:  /save_model
+  model_save_root:  save_model
 
 TEST:
   vis: False
