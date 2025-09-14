@@ -20,7 +20,7 @@ TRAIN:
   k: 3
   t: 5
   max_events_num : 700000
-  model_save_root:  save_model
+  model_save_root: save_model
 
 TEST:
   vis: False
