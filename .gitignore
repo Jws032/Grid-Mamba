@@ -1,0 +1,9 @@
+save_model/
+mlruns/
+.vscode/
+dataset/EV-UAV-dataset
+.idea/
+configs.__pycache__/
+dataset/__pycache__/
+model/__pycache__/
+utils/__pycache__/
