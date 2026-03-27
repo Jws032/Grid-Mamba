@@ -64,6 +64,8 @@ class evalute():
             seg_pred_list.append(v['seg_pred'])
         seg_gt_all = torch.cat(seg_gt_list, dim=0).cpu()
         seg_pred_all = torch.cat(seg_pred_list, dim=0).cpu()
+        
+        # 按概率进行二值化
         seg_pred_all[seg_pred_all >= thresh] = 1
         seg_pred_all[seg_pred_all < thresh] = 0
         assert seg_gt_all.shape == seg_pred_all.shape
@@ -89,7 +91,10 @@ class evalute():
         seg_pred_all[seg_pred_all >= thresh] = 1
         seg_pred_all[seg_pred_all < thresh] = 0
         assert seg_gt_all.shape == seg_pred_all.shape
-        correct = (seg_gt_all[seg_gt_all == 1] == seg_pred_all[seg_gt_all == 1]).sum()
-        whole = (seg_gt_all == 1).sum()
-        seg_accuracy = correct.float() / whole.float()
+        
+        tp = ((seg_pred_all == 1) & (seg_gt_all == 1)).sum()
+        fp = ((seg_pred_all == 1) & (seg_gt_all == 0)).sum()
+        fn = ((seg_pred_all == 0) & (seg_gt_all == 1)).sum()
+        
+        seg_accuracy = tp/ (tp+fp)
         return seg_accuracy

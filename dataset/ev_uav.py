@@ -28,9 +28,9 @@ class EvUAV(BaseDataLoader):
                 print('downsample')
 
         out={}
-        out['ev_loc']=ev_loc
-        out['evs_norm']=evs_norm
-        out['seg_label']=seg_label
+        out['ev_loc']=ev_loc        # [x,y,t]绝对值
+        out['evs_norm']=evs_norm    # [x,y,t,p]归一化
+        out['seg_label']=seg_label  # [0,1]
         out['idx'] = idx
 
         return out

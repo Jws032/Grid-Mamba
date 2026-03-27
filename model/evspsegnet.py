@@ -212,6 +212,6 @@ class evspsegnet(nn.Module):
         x_up2 = self.UR_block_forward(x_conv2, x_up3, self.conv_up_t2, self.conv_up_m2, self.inv_conv2)
         x_up1 = self.UR_block_forward(x_conv1, x_up2, self.conv_up_t1, self.conv_up_m1, self.conv5)
 
-        output = self.semantic_linear(x_up1.features)
-        voxel = x_up1.replace_feature(output)
+        output = self.semantic_linear(x_up1.features) # (N, 1)
+        voxel = x_up1.replace_feature(output) 
         return output,voxel

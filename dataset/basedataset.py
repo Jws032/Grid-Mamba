@@ -132,6 +132,3 @@ class BaseDataLoader(torch.utils.data.Dataset):
         output['idx_label'] = idx_label_batches
 
         return output
-
-
-
