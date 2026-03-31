@@ -3,12 +3,22 @@ import torch
 def temporal_peak_filter_fast_v3(
         timestamps,
         xy,
-        tau_t = 50,
+        sensor_size=(260, 346),   # 原始 sensor 尺寸
+        tau_t= 50,
         spatial_grid_size=5,
         time_bin_size=10.0,
         score_thresh=0.4,
         device="cpu",
+        use_global_density=False,  # 新增参数控制是否使用 global density
 ):
+    xy_scaled = xy.copy()
+    H_s, W_s = sensor_size
+    xy_scaled[:, 0] = xy_scaled[:, 0] * W_s
+    xy_scaled[:, 1] = xy_scaled[:, 1] * H_s
+
+    # 映射时间回原始尺度 (0~8000 ms)
+    timestamps = timestamps * 8000.0
+    
     t = torch.from_numpy(timestamps).float().to(device)
     xy = torch.from_numpy(xy).float().to(device)
 
@@ -19,8 +29,13 @@ def temporal_peak_filter_fast_v3(
     t_idx = ((t - t_min) / time_bin_size).long()
 
     # 2. global density
-    hist = torch.bincount(t_idx)
-    global_density = torch.sqrt(hist[t_idx].float() + 1e-6)
+    hist = torch.bincount(t_idx.cpu()).to(device)
+    
+    if use_global_density:
+        global_density = torch.sqrt(hist[t_idx].float() + 1e-6)
+    else:
+        # 不使用 global density 时，设为 1（相当于移除该项）
+        global_density = torch.ones(N, device=device)
 
     # 3. 空间离散
     x_idx = (xy[:, 0] / spatial_grid_size).long()
@@ -86,13 +101,13 @@ def temporal_peak_filter_fast_v3(
         val = local_ts[xb, yb]
 
         rho[idx_b] = val
-        local_mean[idx_b] = val.mean()
+        mean_val = val.mean()
+        local_mean.index_put_((idx_b,), mean_val.repeat(len(idx_b)))
 
     # 7. score
     score_density = rho / (torch.sqrt(global_density) + 1e-6)  # 保留sqrt，或尝试 torch.log1p(hist[t_idx])
     score_spatial = rho / (local_mean ** 0.5 + 1e-6)  # 指数 <1，降低局部稀疏点的抑制
     score = score_density * score_spatial
-
 
     # 8. threshold（简单版）
     if score_thresh is None:

@@ -5,9 +5,10 @@ from point_head import PointHead
 from event_score import temporal_peak_filter_fast_v3
 
 
-class EventMambaNet(nn.Module):
-    def __init__(self, ...):
+class GridMambaNet(nn.Module):
+    def __init__(self, cfg):
         super().__init__()
+        
         self.ts_encoder = TSGraphEmbedding(...)
         self.local_mamba = LocalMambaBlock(...)
         self.global_vim = GlobalVimBlock(...)
