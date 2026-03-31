@@ -8,3 +8,5 @@ dataset/__pycache__/
 model/__pycache__/
 utils/__pycache__/
 lib/hais_ops/build/
+model/Grid_Mamba/__pycache__
+whl/
