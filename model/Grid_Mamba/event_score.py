@@ -17,10 +17,10 @@ def temporal_peak_filter_fast_v3(
     xy_scaled[:, 1] = xy_scaled[:, 1] * H_s
 
     # 映射时间回原始尺度 (0~8000 ms)
-    timestamps = timestamps * 8000.0
+    timestamps_scaled = timestamps * 8000.0
     
-    t = torch.from_numpy(timestamps).float().to(device)
-    xy = torch.from_numpy(xy).float().to(device)
+    t = torch.from_numpy(timestamps_scaled).float().to(device)
+    xy = torch.from_numpy(xy_scaled).float().to(device)
 
     N = t.shape[0]
 

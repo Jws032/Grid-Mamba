@@ -9,10 +9,10 @@ class LocalMambaBlock(nn.Module):
 
     def forward(self, feats, batch_ids):
         # feats: [N, C]
-        # batch_ids: 每个点属于哪个grid
+        # batch_ids: [N,] 每个点属于哪个grid
 
-        outputs = []
-        grid_feats = []
+        outputs = []    # 每个点经过 Mamba 后的特征，
+        grid_feats = [] # 每个grid的全局表征，[C]
 
         for gid in torch.unique(batch_ids):
             mask = (batch_ids == gid)
@@ -22,6 +22,6 @@ class LocalMambaBlock(nn.Module):
             out = self.mamba(seq)           # [1, K, C]
 
             outputs.append(out.squeeze(0))
-            grid_feats.append(out.mean(1))  # grid feature
+            grid_feats.append(out.mean(1).squeeze(0))  # grid feature [C]
 
         return torch.cat(outputs), torch.stack(grid_feats)

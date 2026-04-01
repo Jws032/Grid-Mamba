@@ -35,8 +35,7 @@ class TSGraphEmbedding(nn.Module):
             nn.Linear(hidden_dim, output_dim),
         )
         
-        # 位置编码（仍然基于原始3D坐标）
-        self.pos_encoding = nn.Linear(3, output_dim)
+        # 移除位置编码层，因为feature_encoder已经处理了完整的坐标信息
 
     def compute_event_scores(self, points):
         """
@@ -93,14 +92,11 @@ class TSGraphEmbedding(nn.Module):
         # points: [N, 3] -> enhanced_points: [N, 4]
         enhanced_points = torch.cat([points, event_scores.unsqueeze(-1)], dim=-1)
         
-        # 3. 特征编码（使用增强后的点）
+        # 3. 特征编码（使用增强后的点，包含完整坐标和分数信息）
         feat = self.feature_encoder(enhanced_points)
         
-        # 4. 位置编码（仅使用原始坐标）
-        pos_enc = self.pos_encoding(points)
-        
-        # 5. 组合特征
-        final_feat = feat + pos_enc
+        # 4. 直接返回特征，不再添加位置编码（避免信息冗余）
+        final_feat = feat
         
         return final_feat
 
