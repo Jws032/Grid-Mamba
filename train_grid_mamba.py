@@ -145,7 +145,7 @@ if __name__ == '__main__':
         scheduler.step()
 
         with torch.no_grad():
-            if epoch >= 1:
+            if epoch >= 40:
                 for sample, ev in enumerate(val_dataloader):
                     points = ev['points'].float().cuda()
                     
