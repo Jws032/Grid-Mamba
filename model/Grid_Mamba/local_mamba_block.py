@@ -68,12 +68,21 @@ class LocalMambaBlock(nn.Module):
 
             # ---- Mamba ----
             x = padded
+
+            # ---- masked norm ----
+            mean = (x * mask.unsqueeze(-1)).sum(dim=1, keepdim=True) / batch_lengths[:, None, None]
+            var = ((x - mean) * mask.unsqueeze(-1)).pow(2).sum(dim=1, keepdim=True) / batch_lengths[:, None, None]
+            x_norm = (x - mean) / torch.sqrt(var + 1e-5)
+
+            # ---- mamba ----
             residual = x
-            x = self.norm(x)
-            x = self.mamba(x)
+            x = self.mamba(x_norm)
             x = self.dropout(x)
+
+            # ---- residual ----
             x = x + residual
 
+            # ---- mask ----
             x = x * mask.unsqueeze(-1)
 
             # -------- 直接写回 point-level --------
@@ -83,6 +92,7 @@ class LocalMambaBlock(nn.Module):
 
             # -------- grid feature（向量化）--------
             grid_feat = x.sum(dim=1) / batch_lengths.unsqueeze(1)
+            grid_feat = torch.tanh(grid_feat)
             grid_feats.append(grid_feat)
 
         grid_feats = torch.cat(grid_feats, dim=0)

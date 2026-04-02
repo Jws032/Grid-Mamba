@@ -18,9 +18,8 @@ class GlobalVimBlock(nn.Module):
 
     def scan(self, x, mask=None):
         """
-        四向扫描（优化版）
+        四向扫描（不再包含 norm / residual）
         x: [B, H, W, C]
-        mask: [B, H, W] (bool)
         """
         B, H, W, C = x.shape
 
@@ -49,29 +48,23 @@ class GlobalVimBlock(nn.Module):
         # 融合
         out = (row_out + col_out + row_rev_out + col_rev_out) / 4.0
 
-        # mask 掉 padding 区域（非常关键）
+        # mask（仍然保留）
         if mask is not None:
             out = out * mask.unsqueeze(-1)
-
-        # residual（关键稳定性）
-        out = out + x
-
-        # norm
-        out = self.norm(out)
 
         return out
 
     def forward(self, x, grid_indices=None, prev_state=None):
         """
         x: [B, N, C]
-        grid_indices: [N, 2] (x, y)
+        grid_indices: [N, 2]
         """
         if x.dim() != 3:
             raise ValueError(f"Expected [B, N, C], got {x.shape}")
 
         B, N, C = x.shape
 
-        # -------- case 1: 使用 grid_indices --------
+        # -------- case 1 --------
         if grid_indices is not None:
             if B != 1:
                 raise NotImplementedError("grid_indices only supports B=1")
@@ -79,48 +72,54 @@ class GlobalVimBlock(nn.Module):
             if grid_indices.numel() == 0:
                 return x, None
 
-            # 计算网格尺寸
+            # ====== PRE-NORM（关键修改）======
+            x_norm = self.norm(x)
+
+            # 构建 grid
             max_x = int(grid_indices[:, 0].max().item()) + 1
             max_y = int(grid_indices[:, 1].max().item()) + 1
-
             H, W = max_y, max_x
 
-            # flatten index
-            flat_idx = grid_indices[:, 1] * W + grid_indices[:, 0]  # [N]
+            flat_idx = grid_indices[:, 1] * W + grid_indices[:, 0]
 
-            # 构建 grid（无 for-loop）
             grid_2d = torch.zeros((H * W, C), device=x.device)
             mask_2d = torch.zeros((H * W,), device=x.device, dtype=torch.bool)
 
-            grid_2d[flat_idx] = x[0]
+            grid_2d[flat_idx] = x_norm[0]   # 注意：用 norm 后的
             mask_2d[flat_idx] = True
 
             grid_2d = grid_2d.view(1, H, W, C)
             mask_2d = mask_2d.view(1, H, W)
 
-            
-            out = self.scan(grid_2d, mask_2d)  # [1, H, W, C]
+            # ====== Mamba scan ======
+            out = self.scan(grid_2d, mask_2d)
 
-            # -------- 还原回点 --------
+            # ====== gather ======
             out_flat = out.view(H * W, C)
             out_points = out_flat[flat_idx]  # [N, C]
 
+            # ====== residual（关键修改）======
+            out_points = out_points + x[0]
+
             return out_points.unsqueeze(0), None
 
-        # -------- case 2: fallback --------
+        # -------- fallback --------
         else:
+            # ====== PRE-NORM ======
+            x_norm = self.norm(x)
+
             H = int(N ** 0.5)
             W = (N + H - 1) // H
-
             total = H * W
 
             if total > N:
                 padding = torch.zeros((B, total - N, C), device=x.device)
-                x_padded = torch.cat([x, padding], dim=1)
+                x_padded = torch.cat([x_norm, padding], dim=1)
+
                 mask = torch.zeros((B, total), device=x.device, dtype=torch.bool)
                 mask[:, :N] = True
             else:
-                x_padded = x[:, :total]
+                x_padded = x_norm[:, :total]
                 mask = torch.ones((B, total), device=x.device, dtype=torch.bool)
 
             x_2d = x_padded.view(B, H, W, C)
@@ -128,7 +127,9 @@ class GlobalVimBlock(nn.Module):
 
             out = self.scan(x_2d, mask_2d)
 
-            out = out.view(B, total, C)
-            out = out[:, :N]
+            out = out.view(B, total, C)[:, :N]
+
+            # ====== residual ======
+            out = out + x
 
             return out, None

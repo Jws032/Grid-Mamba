@@ -5,15 +5,13 @@ import torch.nn as nn
 import numpy as np
 from dataset.ev_uav import EvUAV
 import random
-# 替换模型导入
 from model.Grid_Mamba.grid_mamba_net import GridMambaNet
-# 删除不必要的STCLoss导入，因为实际使用CrossEntropyLoss
-# from utils.stcloss import STCLoss
 
 import torch.optim as optim
 import mlflow
 import tqdm
 from utils.eval import evalute
+
 
 def setup(seed):
     seed_n = seed
@@ -28,7 +26,6 @@ def setup(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.enabled = False
-    # 修改：使用warn_only=True允许非确定性操作
     torch.use_deterministic_algorithms(True, warn_only=True)
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':16:8'
     os.environ['PYTHONHASHSEED'] = str(seed_n)
@@ -38,27 +35,36 @@ if __name__ == '__main__':
     setup(seed)
     device = "cuda:0"
 
-    LARGE_SAMPLE_THRESHOLD = 200000  # 大样本阈值，超过此数量的样本会被标记
-
-    net = GridMambaNet(cfg).train()
-    net.cuda()
+    net = GridMambaNet(cfg).train().cuda()
 
     dataset = EvUAV(cfg, mode='train')
-    train_sampler = torch.utils.data.sampler.RandomSampler(list(range(len(dataset))))
-    train_dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, collate_fn=dataset.custom_collate)  # batch_size=1 for point cloud
+    train_dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=1,
+        collate_fn=dataset.custom_collate
+    )
 
-    # 删除STCLoss的初始化，因为不使用
-    # stc_criterion = STCLoss(k=cfg.k, t=cfg.t, cfg=cfg).cuda()
-
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=cfg.lr)
+    optimizer = optim.Adam(
+        filter(lambda p: p.requires_grad, net.parameters()),
+        lr=cfg.lr
+    )
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
     best_loss = 1e5
     best_iou = 0
 
-    # for val
+    # ===== 新增：early stopping =====
+    best_val_loss = 1e5
+    patience = 5
+    no_improve_epoch = 0
+
+    # ===== val =====
     val_dataset = EvUAV(cfg, mode='val')
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=1, collate_fn=val_dataset.custom_collate)  # 注意这里应该是val_dataset
+    val_dataloader = torch.utils.data.DataLoader(
+        val_dataset,
+        batch_size=1,
+        collate_fn=val_dataset.custom_collate
+    )
     evaluter = evalute(cfg)
 
     # mlflow
@@ -66,97 +72,136 @@ if __name__ == '__main__':
     mlflow.start_run(run_name='train')
 
     for epoch in range(cfg.epochs):
-        pbar = tqdm.tqdm(total=len(train_dataloader), unit="Batch", unit_scale=True,
-                         desc="Epoch: {}".format(epoch), position=0, leave=True)
+        net.train()
+
+        pbar = tqdm.tqdm(
+            total=len(train_dataloader),
+            unit="Batch",
+            unit_scale=True,
+            desc=f"Epoch: {epoch}",
+            position=0,
+            leave=True
+        )
 
         for batch_idx, ev in enumerate(train_dataloader):
-            # 直接使用points字段，已经是归一化的[x, y, t]格式
-            points = ev['points'].float().cuda()  # [N, 3]
-            
-            label = ev['seg_label'].float().cuda()  # [N]
-                   
-            # GridMambaNet 前向传播
-            preds, _ = net(points)  # preds: [N, 1]
+            points = ev['points'].float().cuda()
+            label = ev['seg_label'].float().cuda()
 
-            # 调试：检查模型输出
+            preds, _ = net(points)
+
+            # ===== NaN 检查 =====
             if torch.isnan(preds).any() or torch.isinf(preds).any():
-                print(f"Warning: model output contains NaN/Inf! Shape: {preds.shape}")
-                print("=== NaN/Inf DETECTED - ENTERING DEBUG MODE ===")
-                print(f"Preds stats - min: {preds.min()}, max: {preds.max()}, mean: {preds.mean()}")
-                print(f"Input points stats - min: {points.min()}, max: {points.max()}")
+                print("Warning: model output contains NaN/Inf!")
                 continue
 
-            # 计算损失 - 使用BCEWithLogitsLoss进行二分类
-            # 使用reduction='none'进行安全计算
+            # ===== loss =====
             loss_fn = nn.BCEWithLogitsLoss(reduction='none')
             element_loss = loss_fn(preds, label)
-            
-            # 过滤掉异常损失值
-            valid_loss_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
-            if valid_loss_mask.sum() == 0:
-                print("Warning: all loss elements are NaN/Inf!")
-                continue
-                
-            loss = element_loss[valid_loss_mask].mean()
 
-            # 调试：检查损失值
+            valid_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
+            if valid_mask.sum() == 0:
+                continue
+
+            loss = element_loss[valid_mask].mean()
+
             if torch.isnan(loss) or torch.isinf(loss):
-                print(f"Warning: loss is NaN/Inf! Preds range: [{preds.min():.4f}, {preds.max():.4f}]")
                 continue
 
             optimizer.zero_grad()
             loss.backward()
 
-            # 关键修复：添加梯度裁剪防止梯度爆炸
             torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
 
-            # 调试：检查梯度是否包含NaN
+            # ===== 梯度检查 =====
             has_nan_grad = False
             for param in net.parameters():
-                if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
+                if param.grad is not None and (
+                    torch.isnan(param.grad).any() or torch.isinf(param.grad).any()
+                ):
                     has_nan_grad = True
                     break
+
             if has_nan_grad:
-                print("Warning: gradients contain NaN/Inf! Skipping update.")
-                optimizer.zero_grad()  # 清除梯度，跳过这次更新
+                optimizer.zero_grad()
                 continue
-                
+
             optimizer.step()
 
             pbar.set_postfix(loss=loss.item())
             pbar.update(1)
 
             with torch.no_grad():
-                mlflow.log_metric('loss', loss.item())
+                mlflow.log_metric('train_loss', loss.item(), step=epoch)
+
                 if loss.item() < best_loss:
-                    torch.save(net.state_dict(), cfg.model_save_root + '/best_loss_seed{}.pt'.format(seed))
+                    torch.save(
+                        net.state_dict(),
+                        cfg.model_save_root + f'/best_loss_seed{seed}.pt'
+                    )
                     best_loss = loss.item()
+
             torch.cuda.empty_cache()
 
         scheduler.step()
 
+        # =========================
+        # ===== 验证（每个epoch）=====
+        # =========================
+        net.eval()
+
         with torch.no_grad():
-            if epoch >= 40:
-                for sample, ev in enumerate(val_dataloader):
-                    points = ev['points'].float().cuda()
-                    
-                    label = ev['seg_label'].float().cuda()
-                    idx = ev['idx_label']
+            val_loss_total = 0
+            val_count = 0
+            loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
 
-                    preds, _ = net(points)
-                    
-                    # 确保预测结果格式正确
-                    if preds.shape[0] != label.shape[0]:
-                        # 如果预测和标签长度不匹配，可能需要插值或采样
-                        # 这里假设它们应该匹配
-                        continue
-                    
-                    evaluter.matches[str(sample)] = {}
-                    evaluter.matches[str(sample)]['seg_pred'] = preds.cpu()
-                    evaluter.matches[str(sample)]['seg_gt'] = label.cpu()
-                
-                iou = evaluter.evaluate_semantic_segmantation_miou()
+            evaluter.matches = {}  # 清空
 
-                if iou.item() > best_iou:
-                    torch.save(net.state_dict(), cfg.model_save_root + '/best_iou_seed{}.pt'.format(seed))
-                    best_iou = iou.item()
+            for sample, ev in enumerate(val_dataloader):
+                points = ev['points'].float().cuda()
+                label = ev['seg_label'].float().cuda()
+
+                preds, _ = net(points)
+
+                if preds.shape[0] != label.shape[0]:
+                    continue
+
+                # ===== val loss =====
+                loss = loss_fn(preds, label)
+                val_loss_total += loss.item()
+                val_count += 1
+
+                # ===== eval =====
+                evaluter.matches[str(sample)] = {}
+                evaluter.matches[str(sample)]['seg_pred'] = preds.cpu()
+                evaluter.matches[str(sample)]['seg_gt'] = label.cpu()
+
+            if val_count > 0:
+                val_loss = val_loss_total / val_count
+            else:
+                val_loss = 0
+
+            mlflow.log_metric('val_loss', val_loss, step=epoch)
+
+            iou = evaluter.evaluate_semantic_segmantation_miou()
+            mlflow.log_metric('val_iou', iou.item(), step=epoch)
+
+            print(f"\nEpoch {epoch} | Val Loss: {val_loss:.6f} | IoU: {iou.item():.6f}")
+
+            # ===== 保存 best iou =====
+            if iou.item() > best_iou:
+                torch.save(
+                    net.state_dict(),
+                    cfg.model_save_root + f'/best_iou_seed{seed}.pt'
+                )
+                best_iou = iou.item()
+
+            # ===== early stopping =====
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                no_improve_epoch = 0
+            else:
+                no_improve_epoch += 1
+
+            if no_improve_epoch >= patience:
+                print(f"\nEarly stopping triggered at epoch {epoch}")
+                break
