@@ -16,7 +16,6 @@ class EvUAV(BaseDataLoader):
         events = np.load(os.path.join(self.root,self.file_list[idx]))
         evs_norm,ev_loc,seg_label,idx= events['evs_norm'][:,0:4],events['ev_loc'],events['evs_norm'][:,4],events['evs_norm'][:,5]
 
-
         if self.mode=='train':
             num_events = ev_loc.shape[0]
             if num_events >= cfg.max_events_num:
@@ -28,7 +27,9 @@ class EvUAV(BaseDataLoader):
                 print('downsample')
 
         out={}
-        out['points'] = evs_norm[:, 0:3]  # [x,y,t]归一化坐标，直接用于GridMambaNet
+        # 修改：使用原始坐标 ev_loc 而不是归一化坐标 evs_norm
+        # ev_loc 格式应该是 [x, y, t] 的原始坐标
+        out['points'] = ev_loc[:, 0:3]  # [x,y,t] 原始坐标，将在模型内进行归一化处理
         out['seg_label'] = seg_label  # [0,1]
         out['idx'] = idx
 

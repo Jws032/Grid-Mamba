@@ -21,8 +21,12 @@ class PointHead(nn.Module):
         Args:
             combined_feat: [N, in_dim] 组合特征
         Returns:
-            logits: [N, 1] 预测分数，表示属于目标的概率分数
-                如果num_classes=1，则输出形状为[N, 1]
+            logits: [N] 预测分数，表示属于目标的概率分数
+                输出形状为[N]，可以直接与标签[seg_label]进行比较
                 可以通过sigmoid激活函数转换为概率值
         """
-        return self.mlp(combined_feat)
+        output = self.mlp(combined_feat)
+        # 将输出从[N, 1] squeeze为[N]，以匹配标签的形状
+        if self.num_classes == 1:
+            output = output.squeeze(-1)
+        return output

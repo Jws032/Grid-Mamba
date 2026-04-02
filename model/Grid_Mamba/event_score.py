@@ -11,16 +11,9 @@ def temporal_peak_filter_fast_v3(
         device="cpu",
         use_global_density=False,  # 新增参数控制是否使用 global density
 ):
-    xy_scaled = xy.copy()
-    H_s, W_s = sensor_size
-    xy_scaled[:, 0] = xy_scaled[:, 0] * W_s
-    xy_scaled[:, 1] = xy_scaled[:, 1] * H_s
-
-    # 映射时间回原始尺度 (0~8000 ms)
-    timestamps_scaled = timestamps * 8000.0
-    
-    t = torch.from_numpy(timestamps_scaled).float().to(device)
-    xy = torch.from_numpy(xy_scaled).float().to(device)
+        
+    t = torch.from_numpy(timestamps).float().to(device)
+    xy = torch.from_numpy(xy).float().to(device)
 
     N = t.shape[0]
 

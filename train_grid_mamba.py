@@ -28,7 +28,8 @@ def setup(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.enabled = False
-    torch.use_deterministic_algorithms(True)
+    # 修改：使用warn_only=True允许非确定性操作
+    torch.use_deterministic_algorithms(True, warn_only=True)
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':16:8'
     os.environ['PYTHONHASHSEED'] = str(seed_n)
 
@@ -36,6 +37,8 @@ if __name__ == '__main__':
     seed = 37
     setup(seed)
     device = "cuda:0"
+
+    LARGE_SAMPLE_THRESHOLD = 200000  # 大样本阈值，超过此数量的样本会被标记
 
     net = GridMambaNet(cfg).train()
     net.cuda()
@@ -66,39 +69,27 @@ if __name__ == '__main__':
         pbar = tqdm.tqdm(total=len(train_dataloader), unit="Batch", unit_scale=True,
                          desc="Epoch: {}".format(epoch), position=0, leave=True)
 
-        for ev in train_dataloader:
+        for batch_idx, ev in enumerate(train_dataloader):
             # 直接使用points字段，已经是归一化的[x, y, t]格式
             points = ev['points'].float().cuda()  # [N, 3]
             
             label = ev['seg_label'].float().cuda()  # [N]
-
-            # 调试：检查输入数据是否包含NaN或异常值
-            if torch.isnan(points).any() or torch.isinf(points).any():
-                print(f"Warning: points contains NaN/Inf! Sample shape: {points.shape}")
-                continue
-            if torch.isnan(label).any() or torch.isinf(label).any():
-                print(f"Warning: label contains NaN/Inf! Sample shape: {label.shape}")
-                continue
-            
-            # 严格验证标签值必须是0或1
-            if not torch.all((label == 0) | (label == 1)):
-                unique_labels = torch.unique(label)
-                print(f"Warning: label contains invalid values! Unique values: {unique_labels}")
-                # 强制转换为二进制标签
-                label = (label > 0.5).float()
-
+                   
             # GridMambaNet 前向传播
             preds, _ = net(points)  # preds: [N, 1]
 
             # 调试：检查模型输出
             if torch.isnan(preds).any() or torch.isinf(preds).any():
                 print(f"Warning: model output contains NaN/Inf! Shape: {preds.shape}")
+                print("=== NaN/Inf DETECTED - ENTERING DEBUG MODE ===")
+                print(f"Preds stats - min: {preds.min()}, max: {preds.max()}, mean: {preds.mean()}")
+                print(f"Input points stats - min: {points.min()}, max: {points.max()}")
                 continue
 
             # 计算损失 - 使用BCEWithLogitsLoss进行二分类
             # 使用reduction='none'进行安全计算
             loss_fn = nn.BCEWithLogitsLoss(reduction='none')
-            element_loss = loss_fn(preds.squeeze(1), label)
+            element_loss = loss_fn(preds, label)
             
             # 过滤掉异常损失值
             valid_loss_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
