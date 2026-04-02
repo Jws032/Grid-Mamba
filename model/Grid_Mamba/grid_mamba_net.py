@@ -140,51 +140,18 @@ class GridMambaNet(nn.Module):
 
     def _global_stage_process(self, grid_feat, grid_indices, prev_state=None):
         """
-        全局处理阶段
-        Args:
-            grid_feat: [G, C] 网格特征
-            grid_indices: [G, 3] 网格索引 (grid_x, grid_y, grid_t)
-            prev_state: 之前的状态
-        Returns:
-            F: 处理后的特征 [G, C]
-            new_state: 新状态
+        grid_feat: [G, C]
+        grid_indices: [G, 2]
         """
-        # 添加 batch 维度以符合 GlobalViMBlock 的输入要求 [B, N, C]
-        grid_feat_3d = grid_feat.unsqueeze(0)  # [1, G, C]
-        
-        # 应用全局VIM处理，传入grid_indices进行空间感知建模
-        F_4d, _ = self.global_vim(grid_feat_3d, grid_indices=grid_indices)  # [1, H, W, C]
-        
-        # 将4D输出重新映射回原始的网格顺序 [G, C]
-        # 提取batch维度
-        F_3d = F_4d.squeeze(0)  # [H, W, C]
-        
-        # 根据grid_indices将2D网格特征重新收集为1D序列
-        G = grid_feat.shape[0]
-        C = grid_feat.shape[1]
-        F = torch.zeros((G, C), device=grid_feat.device)
-        
-        # 从grid_indices获取实际的H, W
-        max_x = grid_indices[:, 0].max().item() + 1
-        max_y = grid_indices[:, 1].max().item() + 1
-        H_actual, W_actual = max_y, max_x
-        
-        # 确保F_3d的尺寸匹配
-        if F_3d.shape[0] != H_actual or F_3d.shape[1] != W_actual:
-            # 如果尺寸不匹配，裁剪或填充到正确尺寸
-            H_pad = max(0, H_actual - F_3d.shape[0])
-            W_pad = max(0, W_actual - F_3d.shape[1])
-            if H_pad > 0 or W_pad > 0:
-                F_3d = torch.nn.functional.pad(F_3d, (0, 0, 0, W_pad, 0, H_pad))[:H_actual, :W_actual]
-        
-        # 按原始顺序收集特征
-        for i in range(G):
-            y_idx = grid_indices[i, 1].item()
-            x_idx = grid_indices[i, 0].item()
-            F[i] = F_3d[y_idx, x_idx]
-        
-        # 返回特征和新状态（这里简化为None，实际可能是Mamba的隐藏状态）
-        return F, None
+
+        # [1, G, C]
+        grid_feat = grid_feat.unsqueeze(0)
+
+        # Global Mamba
+        out, _ = self.global_vim(grid_feat, grid_indices=grid_indices)
+
+        # 直接返回 [G, C]
+        return out.squeeze(0), None
 
     def forward(self, points, prev_state=None):
         """
