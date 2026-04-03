@@ -118,22 +118,32 @@ class TSGraphEmbedding(nn.Module):
             feat: [N, output_dim]
         """
         # 1. 计算事件分数（使用原始坐标）
-        event_scores = self.compute_event_scores(points)  # [N]
+        # 假设 compute_event_scores 返回的是 V3 算法算出的原始 score [N]
+        event_scores = self.compute_event_scores(points)  
         
+        # --- 新增：Score 特征工程处理 ---
+        # 1.1 使用 log1p 处理 [0.01, 100+] 的巨大跨度，将其压缩到约 [0.01, 4.6]
+        log_scores = torch.log1p(event_scores)
+        
+        # 1.2 Z-Score 标准化：让特征分布在 0 附近，加速网络收敛
+        score_mean = log_scores.mean()
+        score_std = log_scores.std()
+        normalized_scores = (log_scores - score_mean) / (score_std + 1e-6)
+
         # 2. 对坐标进行归一化（用于特征编码，避免数值过大）
         normalized_points = self._normalize_coordinates(points)  # [N, 3]
         
-        # 3. 将分数作为额外特征拼接到归一化后的点坐标
+        # 3. 将【标准化后的分数】作为额外特征拼接到归一化后的点坐标
         # normalized_points: [N, 3] -> enhanced_points: [N, 4]
-        enhanced_points = torch.cat([normalized_points, event_scores.unsqueeze(-1)], dim=-1)
+        enhanced_points = torch.cat([
+            normalized_points, 
+            normalized_scores.unsqueeze(-1)
+        ], dim=-1)
         
-        # 4. 特征编码（使用归一化后的点坐标和分数信息）
+        # 4. 特征编码（使用增强后的 4 维特征：x, y, t, score）
         feat = self.feature_encoder(enhanced_points)
         
-        # 5. 直接返回特征，不再添加位置编码（避免信息冗余）
-        final_feat = feat
-        
-        return final_feat
+        return feat
 
     def encode_features(self, points):
         """编码输入点的特征"""
