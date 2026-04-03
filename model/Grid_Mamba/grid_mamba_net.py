@@ -140,10 +140,13 @@ class GridMambaNet(nn.Module):
 
     def _global_stage_process(self, grid_feat, grid_indices, prev_state=None):
         """
-        grid_feat: [G, C]
-        grid_indices: [G, 2]
+        Args:
+            grid_feat: [G, C]  网格特征
+            grid_indices: [G, 3]  (grid_x, grid_y, grid_t) 网格的3D空间时间坐标
+        Returns:
+            global_feat: [G, C]  经过全局时空序列建模后的特征
         """
-
+        # 保持 Batch 维度以适配 Mamba 库的 [B, L, D] 要求
         # [1, G, C]
         grid_feat = grid_feat.unsqueeze(0)
 
