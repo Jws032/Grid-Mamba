@@ -42,99 +42,48 @@ class GridMambaNet(nn.Module):
         self.sensor_width = getattr(cfg, 'sensor_size', (260, 346))[1]   # 346
         self.time_max = getattr(cfg, 'whole_t', 8000.0)  # 从配置中获取时间范围
 
-    def _normalize_coordinates(self, points):
-        """
-        将原始坐标归一化到 [0, 1] 范围
-        
-        Args:
-            points: [N, 3] (x, y, t) - 原始坐标
-            
-        Returns:
-            normalized_points: [N, 3] (x_norm, y_norm, t_norm) - 归一化坐标
-        """
-        x_coords = points[:, 0]  # [N]
-        y_coords = points[:, 1]  # [N]  
-        t_coords = points[:, 2]  # [N]
-        
-        # 归一化到 [0, 1] 范围
-        x_norm = x_coords / self.sensor_width
-        y_norm = y_coords / self.sensor_height
-        t_norm = t_coords / self.time_max
-        
-        # 确保归一化后的值在 [0, 1] 范围内（处理可能的边界情况）
-        x_norm = torch.clamp(x_norm, 0.0, 1.0)
-        y_norm = torch.clamp(y_norm, 0.0, 1.0)
-        t_norm = torch.clamp(t_norm, 0.0, 1.0)
-        
-        normalized_points = torch.stack([x_norm, y_norm, t_norm], dim=1)  # [N, 3]
-        return normalized_points
 
     def _local_stage_process(self, points, feat):
         """
-        局部处理阶段 - 使用更大的空间网格和时间单位划分，减少网格数量
-        
         Args:
-            points: [N, 3] (x, y, t) - 原始坐标（将在函数内部归一化）
-            feat: [N, C] 特征
-            
-        Returns:
-            local_feat: 局部Mamba处理后的点特征 [N, C]
-            grid_feat: 网格特征 [G, C]
-            point2grid: 点到网格的映射 [N]
-            grid_indices: 网格索引 [G, 3] (grid_x, grid_y, grid_t)
+            points: [N, 3] (raw_x, raw_y, raw_t)
+            feat: [N, C]
         """
-        # 首先对原始坐标进行归一化
-        normalized_points = self._normalize_coordinates(points)
+        # 1. 定义范围张量 (x_max=346, y_max=260, t_max=8000)
+        limits = torch.tensor([self.sensor_width, self.sensor_height, self.time_max], 
+                            dtype=points.dtype, device=points.device)
         
-        # 增大空间网格参数 (64x64 pixels per grid cell) - 减少网格数量，避免大量空网格
-        spatial_grid_size = 64.0
+        # 步长：空间 64，时间 200
+        stride = torch.tensor([64.0, 64.0, 200.0], 
+                            dtype=points.dtype, device=points.device)
         
-        # 增大时间网格参数 (200 time units per grid cell) - 减少网格数量  
-        temporal_grid_size = 200.0
+        # 2. 坐标预处理
+        points_safe = torch.max(torch.zeros_like(limits), torch.min(points, limits))
         
-        # 获取归一化后的坐标
-        x_coords = normalized_points[:, 0]  # [N]
-        y_coords = normalized_points[:, 1]  # [N]  
-        t_coords = normalized_points[:, 2]  # [N]
+        # 3. 计算网格索引
+        # 使用 rounding_mode='floor' 保证逻辑一致性
+        grid_indices_3d = torch.div(points_safe, stride, rounding_mode='floor').long()
         
-        # 转换归一化坐标到实际坐标（用于网格划分）
-        x_actual = x_coords * self.sensor_width
-        y_actual = y_coords * self.sensor_height
-        t_actual = t_coords * self.time_max
+        # 4. 边界索引二次加固
+        max_grid_idx = (limits / stride).long()
         
-        # 计算网格索引
-        grid_x = torch.floor(x_actual / spatial_grid_size).long()
-        grid_y = torch.floor(y_actual / spatial_grid_size).long()
-        grid_t = torch.floor(t_actual / temporal_grid_size).long()
-        
-        # 获取网格范围
-        max_grid_x = int(self.sensor_width / spatial_grid_size) + 1
-        max_grid_y = int(self.sensor_height / spatial_grid_size) + 1
-        max_grid_t = int(self.time_max / temporal_grid_size) + 1
-        
-        # 确保网格索引在有效范围内
-        grid_x = torch.clamp(grid_x, 0, max_grid_x - 1)
-        grid_y = torch.clamp(grid_y, 0, max_grid_y - 1)
-        grid_t = torch.clamp(grid_t, 0, max_grid_t - 1)
-        
-        # 直接使用3D网格索引创建唯一标识（避免基数编码的冗余计算）
-        # 将3D索引堆叠为 [N, 3] 张量
-        grid_indices_3d = torch.stack([grid_x, grid_y, grid_t], dim=1)  # [N, 3]
-        
-        # 使用unique对3D索引去重，得到唯一的网格索引和映射
-        grid_indices_unique, point2grid = torch.unique(grid_indices_3d, dim=0, return_inverse=True)
-        
-        # 使用局部Mamba处理
-        local_feat, grid_feat = self.local_mamba(feat, point2grid)
-        
-        # 调试：检查grid_feat是否存在极端值
-        grid_feat_min = grid_feat.min().item()
-        grid_feat_max = grid_feat.max().item()
+        grid_indices_3d = torch.max(
+            torch.zeros_like(max_grid_idx), 
+            torch.min(grid_indices_3d, max_grid_idx - 1) # -1 是因为索引从 0 开始
+        )
 
-        
-        # 检测极端值（绝对值超过1000）
-        if abs(grid_feat_min) > 1000 or abs(grid_feat_max) > 1000:
-            print(f"WARNING: Extreme grid_feat values detected! Range: [{grid_feat_min:.4f}, {grid_feat_max:.4f}]")
+        # 5. 唯一标识与点到网格映射
+        grid_indices_unique, point2grid = torch.unique(grid_indices_3d, dim=0, return_inverse=True)
+
+        # 6. Mamba 处理
+        local_feat, grid_feat = self.local_mamba(feat, point2grid)
+            
+        # 7. 数值稳定性监控
+        if self.training:
+            with torch.no_grad():
+                max_val = grid_feat.abs().max().item()
+                if max_val > 100.0:
+                    print(f"\n[Mamba Warning] High dynamic range in grid_feat: {max_val:.2f}")
 
         return local_feat, grid_feat, point2grid, grid_indices_unique
 
