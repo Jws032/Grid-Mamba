@@ -7,7 +7,16 @@ class GlobalVimBlock(nn.Module):
         super().__init__()
         self.dim = dim
         
-        self.mamba = Mamba(
+        # 时间维度扫描器 (处理 T 轴演变)
+        self.mamba_time = Mamba(
+            d_model=dim,
+            d_state=16,
+            d_conv=4,
+            expand=2,
+        )
+        
+        # 空间维度扫描器 (处理 X-Y 交互)
+        self.mamba_space = Mamba(
             d_model=dim,
             d_state=16,
             d_conv=4,
@@ -15,121 +24,76 @@ class GlobalVimBlock(nn.Module):
         )
 
         self.norm = nn.LayerNorm(dim)
+        
+        # 最终融合层：融合时间感知的特征和空间感知的特征
+        self.fuse = nn.Linear(dim * 2, dim)
+        self.dropout = nn.Dropout(0.1)
 
-    def scan(self, x, mask=None):
+    def _lexsort_scan(self, x, indices, sort_dims, mamba_module):
         """
-        四向扫描（不再包含 norm / residual）
-        x: [B, H, W, C]
+        基于多级排序的稀疏扫描函数
+        Args:
+            x: [G, C] 活跃网格特征
+            indices: [G, 3] (gx, gy, gt) 坐标
+            sort_dims: 排序优先级元组, 例如 (2, 1, 0) 表示先按 gt 排, 再按 gy, 最后 gx
+            mamba_module: 使用的 Mamba 模块
         """
-        B, H, W, C = x.shape
-
-        # → 行扫描
-        row = x.reshape(B * H, W, C)
-        row_out = self.mamba(row).reshape(B, H, W, C)
-
-        # ↓ 列扫描
-        col = x.transpose(1, 2).contiguous().view(B * W, H, C)
-        col_out = self.mamba(col).view(B, W, H, C).transpose(1, 2)
-
-        # ← 反向行
-        row_rev = torch.flip(x, dims=[2]).reshape(B * H, W, C)
-        row_rev_out = torch.flip(
-            self.mamba(row_rev).reshape(B, H, W, C),
-            dims=[2]
-        )
-
-        # ↑ 反向列
-        col_rev = torch.flip(x.transpose(1, 2), dims=[2]).contiguous().view(B * W, H, C)
-        col_rev_out = torch.flip(
-            self.mamba(col_rev).view(B, W, H, C),
-            dims=[2]
-        ).transpose(1, 2)
-
-        # 融合
-        out = (row_out + col_out + row_rev_out + col_rev_out) / 4.0
-
-        # mask（仍然保留）
-        if mask is not None:
-            out = out * mask.unsqueeze(-1)
-
-        return out
+        # 1. 执行多级排序 (lexsort 要求输入为 [D, N] 且主键在最后一行)
+        # 我们需要根据 sort_dims 的顺序提取坐标行
+        sort_keys = indices[:, list(sort_dims)].t() # [3, G]
+        
+        # lexsort 返回排序后的索引
+        # 注意：lexsort 在某些 torch 版本可能不稳，这里用 cpu 转换或手动多级排序
+        # 稳健做法：组合键排序
+        # key = t * 10000 + y * 100 + x
+        keys = indices[:, sort_dims[0]] * 10000 + \
+               indices[:, sort_dims[1]] * 100 + \
+               indices[:, sort_dims[2]]
+        
+        sort_idx = torch.argsort(keys)
+        
+        # 2. 变换到排序序列并输入 Mamba
+        x_sorted = x[sort_idx].unsqueeze(0) # [1, G, C]
+        x_out = mamba_module(x_sorted).squeeze(0) # [G, C]
+        
+        # 3. 还原回原始顺序
+        inv_sort_idx = torch.argsort(sort_idx)
+        return x_out[inv_sort_idx]
 
     def forward(self, x, grid_indices=None, prev_state=None):
         """
-        x: [B, N, C]
-        grid_indices: [N, 2]
+        Args:
+            x: [B, G, C]  由于是全局阶段，通常 B=1, G 是活跃网格数
+            grid_indices: [G, 3]  (gx, gy, gt) 
         """
-        if x.dim() != 3:
-            raise ValueError(f"Expected [B, N, C], got {x.shape}")
-
-        B, N, C = x.shape
-
-        # -------- case 1 --------
-        if grid_indices is not None:
-            if B != 1:
-                raise NotImplementedError("grid_indices only supports B=1")
-
-            if grid_indices.numel() == 0:
-                return x, None
-
-            # ====== PRE-NORM（关键修改）======
-            x_norm = self.norm(x)
-
-            # 构建 grid
-            max_x = int(grid_indices[:, 0].max().item()) + 1
-            max_y = int(grid_indices[:, 1].max().item()) + 1
-            H, W = max_y, max_x
-
-            flat_idx = grid_indices[:, 1] * W + grid_indices[:, 0]
-
-            grid_2d = torch.zeros((H * W, C), device=x.device)
-            mask_2d = torch.zeros((H * W,), device=x.device, dtype=torch.bool)
-
-            grid_2d[flat_idx] = x_norm[0]   # 注意：用 norm 后的
-            mask_2d[flat_idx] = True
-
-            grid_2d = grid_2d.view(1, H, W, C)
-            mask_2d = mask_2d.view(1, H, W)
-
-            # ====== Mamba scan ======
-            out = self.scan(grid_2d, mask_2d)
-
-            # ====== gather ======
-            out_flat = out.view(H * W, C)
-            out_points = out_flat[flat_idx]  # [N, C]
-
-            # ====== residual（关键修改）======
-            out_points = out_points + x[0]
-
-            return out_points.unsqueeze(0), None
-
-        # -------- fallback --------
+        if x.dim() == 3:
+            B, G, C = x.shape
+            x = x.squeeze(0) # 处理为 [G, C]
         else:
-            # ====== PRE-NORM ======
-            x_norm = self.norm(x)
+            G, C = x.shape
 
-            H = int(N ** 0.5)
-            W = (N + H - 1) // H
-            total = H * W
+        if grid_indices is None or G == 0:
+            return x.unsqueeze(0), None
 
-            if total > N:
-                padding = torch.zeros((B, total - N, C), device=x.device)
-                x_padded = torch.cat([x_norm, padding], dim=1)
+        # ====== PRE-NORM ======
+        res = x
+        x_norm = self.norm(x)
 
-                mask = torch.zeros((B, total), device=x.device, dtype=torch.bool)
-                mask[:, :N] = True
-            else:
-                x_padded = x_norm[:, :total]
-                mask = torch.ones((B, total), device=x.device, dtype=torch.bool)
+        # ====== 策略 1：时间主轴扫描 (Time-Major) ======
+        # 优先级：gt -> gy -> gx (顺着时间扫，空间作为次级参考)
+        feat_time = self._lexsort_scan(x_norm, grid_indices, (2, 1, 0), self.mamba_time)
 
-            x_2d = x_padded.view(B, H, W, C)
-            mask_2d = mask.view(B, H, W)
+        # ====== 策略 2：空间主轴扫描 (Space-Major) ======
+        # 优先级：gy -> gx -> gt (在空间平面内扫，时间作为次级参考)
+        feat_space = self._lexsort_scan(x_norm, grid_indices, (1, 0, 2), self.mamba_space)
 
-            out = self.scan(x_2d, mask_2d)
+        # ====== 特征融合 ======
+        # 拼接时间维度和空间维度提取的信息
+        combined = torch.cat([feat_time, feat_space], dim=-1)
+        out = self.fuse(combined)
+        out = self.dropout(out)
 
-            out = out.view(B, total, C)[:, :N]
+        # ====== 残差连接 ======
+        out = out + res
 
-            # ====== residual ======
-            out = out + x
-
-            return out, None
+        return out.unsqueeze(0), None

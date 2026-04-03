@@ -9,7 +9,7 @@ def temporal_peak_filter_fast_v3(
         time_bin_size=10.0,
         score_thresh=0.4,
         device="cpu",
-        use_global_density=False,  # 新增参数控制是否使用 global density
+        use_global_density=True,  # 新增参数控制是否使用 global density
 ):
         
     t = torch.from_numpy(timestamps).float().to(device)
