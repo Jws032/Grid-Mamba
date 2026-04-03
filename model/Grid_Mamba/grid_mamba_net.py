@@ -78,7 +78,7 @@ class GridMambaNet(nn.Module):
             feat: [N, C] 特征
             
         Returns:
-            processed_feat: 局部Mamba处理后的点特征 [N, C]
+            local_feat: 局部Mamba处理后的点特征 [N, C]
             grid_feat: 网格特征 [G, C]
             point2grid: 点到网格的映射 [N]
             grid_indices: 网格索引 [G, 3] (grid_x, grid_y, grid_t)
@@ -125,7 +125,7 @@ class GridMambaNet(nn.Module):
         grid_indices_unique, point2grid = torch.unique(grid_indices_3d, dim=0, return_inverse=True)
         
         # 使用局部Mamba处理
-        processed_feat, grid_feat = self.local_mamba(feat, point2grid)
+        local_feat, grid_feat = self.local_mamba(feat, point2grid)
         
         # 调试：检查grid_feat是否存在极端值
         grid_feat_min = grid_feat.min().item()
@@ -136,7 +136,7 @@ class GridMambaNet(nn.Module):
         if abs(grid_feat_min) > 1000 or abs(grid_feat_max) > 1000:
             print(f"WARNING: Extreme grid_feat values detected! Range: [{grid_feat_min:.4f}, {grid_feat_max:.4f}]")
 
-        return processed_feat, grid_feat, point2grid, grid_indices_unique
+        return local_feat, grid_feat, point2grid, grid_indices_unique
 
     def _global_stage_process(self, grid_feat, grid_indices, prev_state=None):
         """
@@ -170,30 +170,29 @@ class GridMambaNet(nn.Module):
             print(f"Feat stats - min: {feat.min()}, max: {feat.max()}, mean: {feat.mean()}")
         
         # 2. 局部 Mamba 模块
-        processed_feat, grid_feat, point2grid, grid_indices = self._local_stage_process(points, feat)
+        local_feat, grid_feat, point2grid, grid_indices = self._local_stage_process(points, feat)
         
         # 检查局部阶段输出
-        if torch.isnan(processed_feat).any() or torch.isinf(processed_feat).any():
-            print(f"WARNING: Local Mamba processed_feat contains NaN/Inf! Shape: {processed_feat.shape}")
+        if torch.isnan(local_feat).any() or torch.isinf(local_feat).any():
+            print(f"WARNING: Local Mamba local_feat contains NaN/Inf! Shape: {local_feat.shape}")
         if torch.isnan(grid_feat).any() or torch.isinf(grid_feat).any():
             print(f"WARNING: Local Mamba grid_feat contains NaN/Inf! Shape: {grid_feat.shape}")
         
         # 3. 全局 VIM 模块
-        F, new_state = self._global_stage_process(grid_feat, grid_indices, prev_state)
+        global_feat, new_state = self._global_stage_process(grid_feat, grid_indices, prev_state)
         
         # 检查全局阶段输出
-        if torch.isnan(F).any() or torch.isinf(F).any():
-            print(f"WARNING: Global VIM output F contains NaN/Inf! Shape: {F.shape}")
-            print(f"F stats - min: {F.min()}, max: {F.max()}, mean: {F.mean()}")
+        if torch.isnan(global_feat).any() or torch.isinf(global_feat).any():
+            print(f"WARNING: Global VIM output global_feat contains NaN/Inf! Shape: {global_feat.shape}")
+            print(f"global_feat stats - min: {global_feat.min()}, max: {global_feat.max()}, mean: {global_feat.mean()}")
             # 打印网格特征统计信息
             print(f"Grid feat stats - min: {grid_feat.min()}, max: {grid_feat.max()}, mean: {grid_feat.mean()}")
             print(f"Grid indices range - x: [{grid_indices[:,0].min()}, {grid_indices[:,0].max()}], "
                   f"y: [{grid_indices[:,1].min()}, {grid_indices[:,1].max()}], "
                   f"t: [{grid_indices[:,2].min()}, {grid_indices[:,2].max()}]")
         
-        # 4. 分类头
-        # 需要整合各种特征
-        combined_feat = self._combine_features(processed_feat, grid_feat, F, point2grid)
+        # 4. 分类头：整合各种特征
+        combined_feat = self._combine_features(local_feat, grid_feat, global_feat, point2grid)
         
         # 检查组合特征
         if torch.isnan(combined_feat).any() or torch.isinf(combined_feat).any():
