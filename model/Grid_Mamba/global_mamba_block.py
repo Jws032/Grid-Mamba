@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from mamba_ssm import Mamba
 
-class GlobalVimBlock(nn.Module):
+class GlobalMambaBlock(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim

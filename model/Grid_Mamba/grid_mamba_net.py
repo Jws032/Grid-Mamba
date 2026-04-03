@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .local_mamba_block import LocalMambaBlock
-from .global_vim_block import GlobalVimBlock
+from .global_mamba_block import GlobalMambaBlock
 from .point_head import PointHead
 from .tsgraph_embedding import TSGraphEmbedding
 
@@ -32,7 +32,7 @@ class GridMambaNet(nn.Module):
         self.local_mamba = LocalMambaBlock(d_model=embed_dim)
         
         # 全局 VIM 块 - 修复：使用 embed_dim 而不是 hidden_dim
-        self.global_vim = GlobalVimBlock(dim=embed_dim)
+        self.global_vim = GlobalMambaBlock(dim=embed_dim)
         
         # 分类头 - 更新为 3 * embed_dim，输出1个类别分数
         self.head = PointHead(in_dim=3 * embed_dim, num_classes=num_classes)
