@@ -48,14 +48,17 @@ if __name__ == '__main__':
         filter(lambda p: p.requires_grad, net.parameters()),
         lr=cfg.lr
     )
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+    
+    # 替换掉原来的 StepLR
+    # T_max 设为总 Epoch 数，eta_min 设为最小学习率 (建议 1e-6)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-6)
 
     best_loss = 1e5
     best_iou = 0
 
     # ===== 新增：early stopping =====
     best_val_loss = 1e5
-    patience = 5
+    patience = 20
     no_improve_epoch = 0
 
     # ===== val =====

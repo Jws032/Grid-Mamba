@@ -1,32 +1,60 @@
+import torch
 import torch.nn as nn
-
 
 class PointHead(nn.Module):
     def __init__(self, in_dim, num_classes=1):
         super().__init__()
-        # 对于二分类任务，num_classes应为1，输出单个目标分数
         self.num_classes = num_classes
-        self.mlp = nn.Sequential(
-            nn.Linear(in_dim, 512),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(256, num_classes)
+        
+        # 1. 尺度自适应注意力：动态学习三个尺度的权重
+        # 维度收缩率设为 8，减少参数量
+        self.attention = nn.Sequential(
+            nn.Linear(in_dim, in_dim // 8),
+            nn.ReLU(inplace=True),
+            nn.Linear(in_dim // 8, in_dim),
+            nn.Sigmoid()
         )
+        
+        # 2. 深度 MLP
+        self.fc1 = nn.Linear(in_dim, 256)
+        self.ln1 = nn.LayerNorm(256)
+        
+        self.fc2 = nn.Linear(256, 128)
+        self.ln2 = nn.LayerNorm(128)
+        
+        self.fc3 = nn.Linear(128, num_classes)
+        
+        self.relu = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout(0.1)
 
     def forward(self, combined_feat):
         """
-        Args:
-            combined_feat: [N, in_dim] 组合特征
-        Returns:
-            logits: [N] 预测分数，表示属于目标的概率分数
-                输出形状为[N]，可以直接与标签[seg_label]进行比较
-                可以通过sigmoid激活函数转换为概率值
+        combined_feat: [N, in_dim] 多尺度特征拼接
         """
-        output = self.mlp(combined_feat)
-        # 将输出从[N, 1] squeeze为[N]，以匹配标签的形状
+        # --- A. 尺度自适应分配 ---
+        # 计算全局通道统计量，用于给不同尺度分配重要度
+        global_context = combined_feat.mean(dim=0, keepdim=True) # [1, in_dim]
+        attn_weights = self.attention(global_context) # [1, in_dim]
+        x = combined_feat * attn_weights
+        
+        # --- B. 特征提炼层 ---
+        # 第一层 (256维)
+        x = self.fc1(x)
+        x = self.ln1(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        
+        # 第二层 (128维)
+        x = self.fc2(x)
+        x = self.ln2(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        
+        # --- C. 最终映射 ---
+        output = self.fc3(x)
+        
+        # 二分类 squeeze 到 [N]
         if self.num_classes == 1:
             output = output.squeeze(-1)
+            
         return output

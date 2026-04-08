@@ -1,17 +1,16 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
 from mamba_ssm import Mamba
-from torch.nn.utils.rnn import pad_sequence
 
 class LocalMambaBlock(nn.Module):
     def __init__(
         self,
-        d_model: int,       # 输入、输出维度：x(t),y(t)
-        d_state: int = 16,  # SSM中每个通道的状态向量的维度(在Mamba中，状态被分解为：h(t) ∈ ℝ^{d_inner × d_state}  # 如 (1024, 16))
+        d_model: int,       # 输入、输出维度
+        d_state: int = 16,  # SSM 状态维度
         d_conv: int = 4,
-        expand: int = 2,    # 内部隐藏状态的维度相对于输入维度的扩展倍数：h(t)的 d_inner = d_model * expand
+        expand: int = 2,    # 扩展倍数
         dropout: float = 0.1,
-        batch_size: int = 128,  # 新增参数：每次处理的grid数量
+        batch_size: int = 64, # 每次处理的 grid 数量
     ):
         super().__init__()
         self.d_model = d_model
@@ -20,7 +19,6 @@ class LocalMambaBlock(nn.Module):
         self.expand = expand
         self.batch_size = batch_size
         
-        self.norm = nn.LayerNorm(d_model)
         self.mamba = Mamba(
             d_model=d_model,
             d_state=d_state,
@@ -29,72 +27,79 @@ class LocalMambaBlock(nn.Module):
         )
         self.dropout = nn.Dropout(dropout)
 
-
-    def forward(self, feats, batch_ids):
+    def forward(self, feats, point2grid):
+        """
+        feats: [N, C]
+        point2grid: [N] (每个点所属的 grid ID)
+        """
         device = feats.device
-        unique_ids = torch.unique(batch_ids)
+        N, C = feats.shape
 
-        # -------- 收集序列 --------
-        seqs = []
-        lengths = []
-        indices_list = []
+        # 1. 排序（比循环遍历快得多）
+        sorted_indices = torch.argsort(point2grid)
+        sorted_feats = feats[sorted_indices]
+        sorted_grid_ids = point2grid[sorted_indices]
 
-        for gid in unique_ids:
-            idx = torch.where(batch_ids == gid)[0]
-            seqs.append(feats[idx])
-            lengths.append(len(idx))
-            indices_list.append(idx)
+        # 2. 识别网格边界
+        unique_ids, counts = torch.unique_consecutive(sorted_grid_ids, return_counts=True)
+        num_grids = len(unique_ids)
+        
+        # 预计算累加计数，用于切片
+        cum_counts = torch.zeros(num_grids + 1, dtype=torch.long, device=device)
+        torch.cumsum(counts, dim=0, out=cum_counts[1:])
 
-        lengths = torch.tensor(lengths, device=device)
-        B = len(seqs)
+        # 存储最终输出
+        final_sorted_outputs = torch.zeros_like(sorted_feats)
+        
+        # 3. 分批处理网格（防止某个超大网格导致 batch 内 Padding 过多）
+        for start in range(0, num_grids, self.batch_size):
+            end = min(start + self.batch_size, num_grids)
+            
+            # --- 构造当前 Batch 的数据 ---
+            batch_counts = counts[start:end]
+            batch_max_len = batch_counts.max().item()
+            batch_num_grids = end - start
+            
+            # 构造 Mask: [batch_num_grids, batch_max_len]
+            grid_offsets = torch.arange(batch_max_len, device=device).unsqueeze(0)
+            batch_mask = grid_offsets < batch_counts.unsqueeze(1)
+            
+            # 填充数据
+            x_batch = torch.zeros((batch_num_grids, batch_max_len, C), device=device)
+            # 提取当前 batch 涉及的所有点
+            batch_points = sorted_feats[cum_counts[start] : cum_counts[end]]
+            x_batch[batch_mask] = batch_points
+            
+            # --- 核心修改：对齐旧代码的 Masked Norm ---
+            # 只计算有效点的均值和方差，不受 Padding 的 0 干扰
+            mask_expanded = batch_mask.unsqueeze(-1) # [B, L, 1]
+            batch_counts_float = batch_counts.unsqueeze(1).unsqueeze(2).float() # [B, 1, 1]
+            
+            # 计算均值
+            mean = (x_batch * mask_expanded).sum(dim=1, keepdim=True) / batch_counts_float
+            # 计算方差
+            var = (((x_batch - mean) * mask_expanded).pow(2)).sum(dim=1, keepdim=True) / batch_counts_float
+            # 归一化
+            x_norm = (x_batch - mean) / torch.sqrt(var + 1e-5)
+            x_norm = x_norm * mask_expanded # 再次确保 padding 部分为 0
+            
+            # --- Mamba 推理 ---
+            residual = x_batch
+            x_out = self.mamba(x_norm)
+            x_out = self.dropout(x_out)
+            
+            # --- 残差连接与 Mask ---
+            # 对齐旧代码：x = x + residual
+            x_out = (x_out + residual) * mask_expanded
+            
+            # 4. 写回当前 batch 的点
+            final_sorted_outputs[cum_counts[start] : cum_counts[end]] = x_out[batch_mask]
 
-        # -------- 输出初始化 --------
-        final_outputs = torch.zeros_like(feats)
-        grid_feats = []
+            # 及时释放，缓解显存压力
+            del x_batch, batch_mask, x_out, x_norm, mean, var
 
-        # -------- 分 batch 处理 --------
-        for start in range(0, B, self.batch_size):
-            end = min(start + self.batch_size, B)
-
-            batch_seqs = seqs[start:end]
-            batch_lengths = lengths[start:end]
-            batch_indices = indices_list[start:end]
-
-            # padding（仅 batch 内）
-            padded = pad_sequence(batch_seqs, batch_first=True)  # [b, L, C]
-            b, L, C = padded.shape
-
-            mask = torch.arange(L, device=device)[None, :] < batch_lengths[:, None]
-
-            # ---- Mamba ----
-            x = padded
-
-            # ---- masked norm ----
-            mean = (x * mask.unsqueeze(-1)).sum(dim=1, keepdim=True) / batch_lengths[:, None, None]
-            var = ((x - mean) * mask.unsqueeze(-1)).pow(2).sum(dim=1, keepdim=True) / batch_lengths[:, None, None]
-            x_norm = (x - mean) / torch.sqrt(var + 1e-5)
-
-            # ---- mamba ----
-            residual = x
-            x = self.mamba(x_norm)
-            x = self.dropout(x)
-
-            # ---- residual ----
-            x = x + residual
-
-            # ---- mask ----
-            x = x * mask.unsqueeze(-1)
-
-            # -------- 直接写回 point-level --------
-            for i in range(b):
-                valid_len = batch_lengths[i]
-                final_outputs[batch_indices[i]] = x[i, :valid_len]
-
-            # -------- grid feature（向量化）--------
-            grid_feat = x.sum(dim=1) / batch_lengths.unsqueeze(1)
-            grid_feat = torch.tanh(grid_feat)
-            grid_feats.append(grid_feat)
-
-        grid_feats = torch.cat(grid_feats, dim=0)
-
-        return final_outputs, grid_feats
+        # 5. 还原到原始的点序
+        rev_indices = torch.empty(N, dtype=torch.long, device=device)
+        rev_indices[sorted_indices] = torch.arange(N, device=device)
+        
+        return final_sorted_outputs[rev_indices], None
