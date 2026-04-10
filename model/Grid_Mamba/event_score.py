@@ -1,6 +1,6 @@
 import torch
 
-def temporal_peak_filter_fast_v3(
+def temporal_peak_filter(
         timestamps,
         xy,
         sensor_size=(260, 346),   # 原始 sensor 尺寸
@@ -10,6 +10,7 @@ def temporal_peak_filter_fast_v3(
         score_thresh=0.4,
         device="cpu",
         use_global_density=True,  # 新增参数控制是否使用 global density
+        return_processed_score=True,  # 新增参数控制是否返回处理后的score
 ):
         
     t = torch.from_numpy(timestamps).float().to(device)
@@ -102,11 +103,24 @@ def temporal_peak_filter_fast_v3(
     score_spatial = rho / (local_mean ** 0.5 + 1e-6)  # 指数 <1，降低局部稀疏点的抑制
     score = score_density * score_spatial
 
+    # --- Score 特征工程处理 ---
+    if return_processed_score:
+        # 7.1 使用 log1p 处理 [0.01, 100+] 的巨大跨度，将其压缩到约 [0.01, 4.6]
+        log_scores = torch.log1p(score)
+        
+        # 7.2 Z-Score 标准化：让特征分布在 0 附近，加速网络收敛
+        score_mean = log_scores.mean()
+        score_std = log_scores.std()
+        processed_score = (log_scores - score_mean) / (score_std + 1e-6)
+    else:
+        processed_score = score
+
     # 8. threshold（简单版）
     if score_thresh is None:
-        thresh = torch.quantile(score, 0.7)
+        thresh = torch.quantile(processed_score if return_processed_score else score, 0.7)
     else:
         thresh = score_thresh
 
-    mask = score > thresh
-    return mask.cpu().numpy(), score.cpu().numpy()
+    mask = (processed_score if return_processed_score else score) > thresh
+    
+    return mask.cpu().numpy(), processed_score.cpu().numpy()

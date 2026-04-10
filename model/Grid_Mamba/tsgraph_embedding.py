@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from .event_score import temporal_peak_filter_fast_v3
+from .event_score import temporal_peak_filter
 
 
 class TSGraphEmbedding(nn.Module):
@@ -44,13 +44,13 @@ class TSGraphEmbedding(nn.Module):
 
     def compute_event_scores(self, points):
         """
-        使用 temporal_peak_filter_fast_v3 计算事件分数
+        使用 temporal_peak_filter_fast_v3 计算事件分数（已包含特征工程处理）
         
         Args:
             points: [N, 3] tensor, (x, y, t) coordinates (原始坐标)
             
         Returns:
-            scores: [N] tensor, event scores for each point
+            scores_tensor: [N] tensor, processed event scores for each point
         """
         # 转换为numpy数组用于event_score函数
         points_np = points.detach().cpu().numpy()
@@ -60,9 +60,9 @@ class TSGraphEmbedding(nn.Module):
         # 计算设备
         device = points.device
         
-        # 调用event_score函数
+        # 调用event_score函数（现在直接返回处理后的score）
         try:
-            mask, scores = temporal_peak_filter_fast_v3(
+            mask, scores = temporal_peak_filter(
                 timestamps=timestamps,
                 xy=xy,
                 sensor_size=self.sensor_size,
@@ -70,7 +70,8 @@ class TSGraphEmbedding(nn.Module):
                 spatial_grid_size=self.spatial_grid_size,
                 time_bin_size=self.time_bin_size,
                 device=str(device),
-                use_global_density=self.use_global_density
+                use_global_density=self.use_global_density,
+                return_processed_score=True  # 明确指定返回处理后的score
             )
             
             # 转换回torch tensor
@@ -118,17 +119,8 @@ class TSGraphEmbedding(nn.Module):
             feat: [N, output_dim]
         """
         # 1. 计算事件分数（使用原始坐标）
-        # 假设 compute_event_scores 返回的是 V3 算法算出的原始 score [N]
+        # compute_event_scores 现在直接返回处理好的 score [N]
         event_scores = self.compute_event_scores(points)  
-        
-        # --- 新增：Score 特征工程处理 ---
-        # 1.1 使用 log1p 处理 [0.01, 100+] 的巨大跨度，将其压缩到约 [0.01, 4.6]
-        log_scores = torch.log1p(event_scores)
-        
-        # 1.2 Z-Score 标准化：让特征分布在 0 附近，加速网络收敛
-        score_mean = log_scores.mean()
-        score_std = log_scores.std()
-        normalized_scores = (log_scores - score_mean) / (score_std + 1e-6)
 
         # 2. 对坐标进行归一化（用于特征编码，避免数值过大）
         normalized_points = self._normalize_coordinates(points)  # [N, 3]
@@ -137,7 +129,7 @@ class TSGraphEmbedding(nn.Module):
         # normalized_points: [N, 3] -> enhanced_points: [N, 4]
         enhanced_points = torch.cat([
             normalized_points, 
-            normalized_scores.unsqueeze(-1)
+            event_scores.unsqueeze(-1)
         ], dim=-1)
         
         # 4. 特征编码（使用增强后的 4 维特征：x, y, t, score）
