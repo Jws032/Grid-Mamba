@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from .event_score import temporal_peak_filter
-
+from .event_score import temporal_peak_filter_torch
 
 class TSGraphEmbedding(nn.Module):
     def __init__(self, 
@@ -15,23 +14,26 @@ class TSGraphEmbedding(nn.Module):
                  time_bin_size=10.0,
                  use_global_density=True):
         super(TSGraphEmbedding, self).__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
         
-        # Event score parameters
+        # 参数存储
         self.sensor_size = sensor_size
         self.tau_t = tau_t
         self.spatial_grid_size = spatial_grid_size
         self.time_bin_size = time_bin_size
         self.use_global_density = use_global_density
-        
-        # 存储传感器尺寸和时间范围用于归一化
-        self.sensor_height = sensor_size[0]  # 260
-        self.sensor_width = sensor_size[1]   # 346
-        self.time_max = 8000.0  # 假设时间范围是8000ms
-        
-        # 特征编码层 - 现在输入维度增加1（包含score）
+        self.sensor_height, self.sensor_width = sensor_size
+        self.time_max = 8000.0 
+
+        # --- 新增：可学习的空间高斯卷积核 ---
+        # 初始化为原来的高斯值以保证训练初期稳定性
+        initial_kernel = torch.tensor([
+            [0.05, 0.1, 0.05],
+            [0.1,  0.4, 0.1],
+            [0.05, 0.1, 0.05]
+        ]).view(1, 1, 3, 3)
+        self.learnable_kernel = nn.Parameter(initial_kernel)
+
+        # 特征编码层 (x, y, t, score)
         self.feature_encoder = nn.Sequential(
             nn.Linear(input_dim + 1, hidden_dim),  # +1 for score feature
             nn.ReLU(),
@@ -39,104 +41,38 @@ class TSGraphEmbedding(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, output_dim),
         )
-        
-        # 移除位置编码层，因为feature_encoder已经处理了完整的坐标信息
-
-    def compute_event_scores(self, points):
-        """
-        使用 temporal_peak_filter_fast_v3 计算事件分数（已包含特征工程处理）
-        
-        Args:
-            points: [N, 3] tensor, (x, y, t) coordinates (原始坐标)
-            
-        Returns:
-            scores_tensor: [N] tensor, processed event scores for each point
-        """
-        # 转换为numpy数组用于event_score函数
-        points_np = points.detach().cpu().numpy()
-        xy = points_np[:, :2]  # x, y coordinates
-        timestamps = points_np[:, 2]  # t coordinate
-        
-        # 计算设备
-        device = points.device
-        
-        # 调用event_score函数（现在直接返回处理后的score）
-        try:
-            mask, scores = temporal_peak_filter(
-                timestamps=timestamps,
-                xy=xy,
-                sensor_size=self.sensor_size,
-                tau_t=self.tau_t,
-                spatial_grid_size=self.spatial_grid_size,
-                time_bin_size=self.time_bin_size,
-                device=str(device),
-                use_global_density=self.use_global_density,
-                return_processed_score=True  # 明确指定返回处理后的score
-            )
-            
-            # 转换回torch tensor
-            scores_tensor = torch.from_numpy(scores).float().to(device)
-            
-        except Exception as e:
-            # 如果出现错误，返回默认分数（全1）
-            print(f"Warning: Event score computation failed: {e}")
-            scores_tensor = torch.ones(points.size(0), device=points.device)
-        
-        return scores_tensor
 
     def _normalize_coordinates(self, points):
-        """
-        将原始坐标归一化到 [0, 1] 范围
-        
-        Args:
-            points: [N, 3] (x, y, t) - 原始坐标
-            
-        Returns:
-            normalized_points: [N, 3] (x_norm, y_norm, t_norm) - 归一化坐标
-        """
-        x_coords = points[:, 0]  # [N]
-        y_coords = points[:, 1]  # [N]  
-        t_coords = points[:, 2]  # [N]
-        
-        # 归一化到 [0, 1] 范围
-        x_norm = x_coords / self.sensor_width
-        y_norm = y_coords / self.sensor_height
-        t_norm = t_coords / self.time_max
-        
-        # 确保归一化后的值在 [0, 1] 范围内（处理可能的边界情况）
-        x_norm = torch.clamp(x_norm, 0.0, 1.0)
-        y_norm = torch.clamp(y_norm, 0.0, 1.0)
-        t_norm = torch.clamp(t_norm, 0.0, 1.0)
-        
-        normalized_points = torch.stack([x_norm, y_norm, t_norm], dim=1)  # [N, 3]
-        return normalized_points
+        # 保持原有逻辑
+        norm_scale = torch.tensor([self.sensor_width, self.sensor_height, self.time_max], device=points.device)
+        normalized = points / norm_scale
+        return torch.clamp(normalized, 0.0, 1.0)
 
     def forward(self, points):
         """
-        Args:
-            points: [N, 3] (x, y, t) - 原始坐标
-        Returns:
-            feat: [N, output_dim]
+        Args: points [N, 3] (x, y, t)
         """
-        # 1. 计算事件分数（使用原始坐标）
-        # compute_event_scores 现在直接返回处理好的 score [N]
-        event_scores = self.compute_event_scores(points)  
+        # 1. 计算事件分数 (传入可学习卷积核)
+        # 注意：此处不再转为 numpy，以保留梯度流
+        event_scores = temporal_peak_filter_torch(
+            points=points,
+            kernel=self.learnable_kernel,
+            sensor_size=self.sensor_size,
+            tau_t=self.tau_t,
+            spatial_grid_size=self.spatial_grid_size,
+            time_bin_size=self.time_bin_size,
+            use_global_density=self.use_global_density
+        )
 
-        # 2. 对坐标进行归一化（用于特征编码，避免数值过大）
-        normalized_points = self._normalize_coordinates(points)  # [N, 3]
+        # 2. 坐标归一化
+        normalized_points = self._normalize_coordinates(points)
         
-        # 3. 将【标准化后的分数】作为额外特征拼接到归一化后的点坐标
-        # normalized_points: [N, 3] -> enhanced_points: [N, 4]
-        enhanced_points = torch.cat([
-            normalized_points, 
-            event_scores.unsqueeze(-1)
-        ], dim=-1)
+        # 3. 特征拼接 [N, 4]
+        enhanced_points = torch.cat([normalized_points, event_scores.unsqueeze(-1)], dim=-1)
         
-        # 4. 特征编码（使用增强后的 4 维特征：x, y, t, score）
-        feat = self.feature_encoder(enhanced_points)
-        
-        return feat
-
+        # 4. 编码
+        return self.feature_encoder(enhanced_points)
+    
     def encode_features(self, points):
         """编码输入点的特征"""
         return self.forward(points)
