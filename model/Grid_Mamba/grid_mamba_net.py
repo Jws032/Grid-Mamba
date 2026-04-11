@@ -24,7 +24,7 @@ class GridMambaNet(nn.Module):
             tau_t=getattr(cfg, 'tau_t', 50),
             spatial_grid_size=getattr(cfg, 'spatial_grid_size', 5),
             time_bin_size=getattr(cfg, 'time_bin_size', 10.0),
-            use_global_density=getattr(cfg, 'use_global_density', False)
+            use_global_density=getattr(cfg, 'use_global_density', True)
         )
         
         # 2. 定义多尺度 Local Mamba 组
