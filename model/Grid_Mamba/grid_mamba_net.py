@@ -27,6 +27,7 @@ class GridMambaNet(nn.Module):
         self.num_classes = num_classes
         self.window_size = float(getattr(cfg, "window_size", 400.0))
         self.use_window = bool(getattr(cfg, "use_window", True))
+        self.use_grid_pos_encoding = bool(getattr(cfg, "use_grid_pos_encoding", True))
 
         sensor_size = getattr(cfg, "sensor_size", (260, 346))
         self.sensor_height, self.sensor_width = sensor_size
@@ -66,6 +67,21 @@ class GridMambaNet(nn.Module):
             LocalMambaBlock(**local_mamba_kwargs)
             for _ in self.scale_strides
         ])
+
+        # 轻量 grid-relative position encoding：让每个尺度的 Mamba 知道点在当前 3D grid 内的位置。
+        pos_hidden_dim = max(embed_dim // 2, 16)
+        self.grid_pos_encoders = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(3, pos_hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(pos_hidden_dim, embed_dim),
+            )
+            for _ in self.scale_strides
+        ])
+        # 让新增分支初始时近似不改变原 baseline，训练中再逐步学习位置增量。
+        for encoder in self.grid_pos_encoders:
+            nn.init.zeros_(encoder[-1].weight)
+            nn.init.zeros_(encoder[-1].bias)
 
         self.head = PointHead(
             in_dim=len(self.scale_strides) * embed_dim,
@@ -109,6 +125,34 @@ class GridMambaNet(nn.Module):
         )
         return point2grid
 
+    def _get_grid_relative_pos(self, points: torch.Tensor, stride: torch.Tensor) -> torch.Tensor:
+        """
+        计算点在当前 3D grid 内的归一化相对位置。
+
+        输出范围大致为 [-0.5, 0.5]，分别对应当前 grid 内的 x/y/t 相对位置。
+        """
+        limits = torch.tensor(
+            [self.sensor_width, self.sensor_height, self.time_max],
+            dtype=points.dtype,
+            device=points.device,
+        ).unsqueeze(0)
+
+        points_xyz = points[:, :3].clamp(
+            min=torch.zeros_like(limits),
+            max=limits,
+        )
+
+        grid_indices = torch.div(
+            points_xyz,
+            stride.unsqueeze(0),
+            rounding_mode="floor",
+        )
+
+        grid_origin = grid_indices * stride.unsqueeze(0)
+        rel_pos = (points_xyz - grid_origin) / stride.unsqueeze(0)
+        rel_pos = rel_pos.clamp(0.0, 1.0) - 0.5
+        return rel_pos
+
     def _forward_one_window(
         self,
         points: torch.Tensor,
@@ -124,7 +168,14 @@ class GridMambaNet(nn.Module):
             )
 
             point2grid = self._get_point2grid(points, stride)
-            local_feat, _ = self.local_mamba_levels[level](feats, point2grid)
+
+            if self.use_grid_pos_encoding:
+                rel_pos = self._get_grid_relative_pos(points, stride)
+                mamba_input = feats + self.grid_pos_encoders[level](rel_pos)
+            else:
+                mamba_input = feats
+
+            local_feat, _ = self.local_mamba_levels[level](mamba_input, point2grid)
             scale_feats.append(local_feat)
 
         fused_feat = torch.cat(scale_feats, dim=-1)
