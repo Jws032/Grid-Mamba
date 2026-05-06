@@ -1,102 +1,189 @@
 import torch
 import torch.nn as nn
-from torch.utils.checkpoint import checkpoint # 必须导入
+
 from .local_mamba_block import LocalMambaBlock
-# from .global_mamba_block import GlobalMambaBlock # 已经不再需要全局模块
 from .point_head import PointHead
 from .tsgraph_embedding import TSGraphEmbedding
 
+
 class GridMambaNet(nn.Module):
+    """
+    GridMambaNet with temporal window processing.
+
+    核心设计：
+    1. 使用全局 TSGraphEmbedding 编码事件点特征；
+    2. 在 forward 内部按时间 window 分段，降低单次局部建模的显存压力；
+    3. 每个 window 内采用多尺度 3D grid 划分；
+    4. 不引入跨 window 的 memory/state，保持 baseline 简洁。
+    """
+
     def __init__(self, cfg):
         super().__init__()
-        
-        # 获取配置参数
-        input_dim = getattr(cfg, 'input_dim', 3)
-        embed_dim = getattr(cfg, 'embed_dim', 128)
-        num_classes = getattr(cfg, 'num_classes', 1)
-        
-        # 1. TS 图特征嵌入层
+
+        input_dim = getattr(cfg, "input_dim", 3)
+        embed_dim = getattr(cfg, "embed_dim", 128)
+        num_classes = getattr(cfg, "num_classes", 1)
+
+        self.num_classes = num_classes
+        self.window_size = float(getattr(cfg, "window_size", 400.0))
+        self.use_window = bool(getattr(cfg, "use_window", True))
+
+        sensor_size = getattr(cfg, "sensor_size", (260, 346))
+        self.sensor_height, self.sensor_width = sensor_size
+        self.time_max = float(getattr(cfg, "whole_t", 8000.0))
+
         self.ts_encoder = TSGraphEmbedding(
             input_dim=input_dim,
             hidden_dim=embed_dim,
             output_dim=embed_dim,
-            sensor_size=getattr(cfg, 'sensor_size', (260, 346)),
-            tau_t=getattr(cfg, 'tau_t', 50),
-            spatial_grid_size=getattr(cfg, 'spatial_grid_size', 5),
-            time_bin_size=getattr(cfg, 'time_bin_size', 10.0),
-            use_global_density=getattr(cfg, 'use_global_density', True)
+            sensor_size=sensor_size,
+            tau_t=getattr(cfg, "tau_t", 50),
+            spatial_grid_size=getattr(cfg, "spatial_grid_size", 5),
+            time_bin_size=getattr(cfg, "time_bin_size", 10.0),
+            use_global_density=getattr(cfg, "use_global_density", True),
         )
-        
-        # 2. 定义多尺度 Local Mamba 组
-        # 预定义三个尺度的步长
-        self.scale_strides = [
-            [32.0, 32.0, 100.0],   # 细粒度
-            [64.0, 64.0, 200.0],   # 中等
-            [128.0, 128.0, 400.0]  # 粗糙
-        ]
-        # 为每个尺度创建一个 LocalMambaBlock
-        self.local_mamba_levels = nn.ModuleList([
-            LocalMambaBlock(d_model=embed_dim) for _ in range(len(self.scale_strides))
-        ])
-        
-        # 3. 分类头 - 输入是多个尺度特征的拼接 (3 * embed_dim)
-        self.head = PointHead(in_dim=len(self.scale_strides) * embed_dim, num_classes=num_classes)
-        
-        # 传感器参数
-        self.sensor_height = getattr(cfg, 'sensor_size', (260, 346))[0]
-        self.sensor_width = getattr(cfg, 'sensor_size', (260, 346))[1]
-        self.time_max = getattr(cfg, 'whole_t', 8000.0)
 
-    def _get_point2grid(self, points, stride):
-        # 确保 limits 和 points 在同一设备且维度匹配
-        # limits: [3] -> [1, 3] 以便对 [N, 3] 的点进行广播比较
-        limits = torch.tensor([self.sensor_width, self.sensor_height, self.time_max], 
-                            dtype=points.dtype, device=points.device).unsqueeze(0)
-        
-        # 使用 torch.min/max 代替 clamp，处理 Tensor 边界更灵活
-        # 确保坐标在 [0, limits] 之间
-        points_safe = torch.max(torch.zeros_like(limits), torch.min(points, limits))
-        
-        # 计算网格索引
-        grid_indices_3d = torch.div(points_safe, stride.unsqueeze(0), rounding_mode='floor').long()
-        
-        # 这里的 max_grid_idx 也要处理成 [1, 3] 方便比较
-        max_grid_idx = (limits / stride.unsqueeze(0)).long()
-        
-        # 确保索引不越界 [0, max_idx - 1]
-        grid_indices_3d = torch.max(
-            torch.zeros_like(max_grid_idx), 
-            torch.min(grid_indices_3d, max_grid_idx - 1)
+        # 多尺度 3D grid: [x_stride, y_stride, t_stride]
+        self.scale_strides = [
+            [32.0, 32.0, 100.0],
+            [64.0, 64.0, 200.0],
+            [128.0, 128.0, 400.0],
+        ]
+
+        local_mamba_kwargs = dict(
+            d_model=embed_dim,
+            d_state=getattr(cfg, "d_state", 16),
+            d_conv=getattr(cfg, "d_conv", 4),
+            expand=getattr(cfg, "expand", 2),
+            dropout=getattr(cfg, "dropout", 0.1),
+            max_seq_len=getattr(cfg, "max_seq_len", 1024),
+            small_bucket_bs=getattr(cfg, "small_bucket_bs", 128),
+            mid_bucket_bs=getattr(cfg, "mid_bucket_bs", 64),
+            large_bucket_bs=getattr(cfg, "large_bucket_bs", 16),
         )
-        
-        # 唯一化并获取映射
-        _, point2grid = torch.unique(grid_indices_3d, dim=0, return_inverse=True)
+
+        self.local_mamba_levels = nn.ModuleList([
+            LocalMambaBlock(**local_mamba_kwargs)
+            for _ in self.scale_strides
+        ])
+
+        self.head = PointHead(
+            in_dim=len(self.scale_strides) * embed_dim,
+            num_classes=num_classes,
+        )
+
+    def _get_point2grid(self, points: torch.Tensor, stride: torch.Tensor) -> torch.Tensor:
+        """
+        将事件点映射到 3D grid。
+
+        points: [N, >=3], 前三维为 [x, y, t]
+        stride: [3], 对应 [x_stride, y_stride, t_stride]
+        """
+        limits = torch.tensor(
+            [self.sensor_width, self.sensor_height, self.time_max],
+            dtype=points.dtype,
+            device=points.device,
+        ).unsqueeze(0)
+
+        points_xyz = points[:, :3].clamp(
+            min=torch.zeros_like(limits),
+            max=limits,
+        )
+
+        grid_indices = torch.div(
+            points_xyz,
+            stride.unsqueeze(0),
+            rounding_mode="floor",
+        ).long()
+
+        max_grid_indices = (limits / stride.unsqueeze(0)).long()
+        grid_indices = torch.minimum(
+            torch.maximum(grid_indices, torch.zeros_like(max_grid_indices)),
+            max_grid_indices - 1,
+        )
+
+        _, point2grid = torch.unique(
+            grid_indices,
+            dim=0,
+            return_inverse=True,
+        )
         return point2grid
 
-    def forward(self, points, prev_state=None):
-        """
-        多尺度前向传播 - 已移除 checkpoint 以提升速度
-        """
-        # 1. TS 图特征嵌入
-        feat = self.ts_encoder.encode_features(points)  
-        
-        all_scale_feats = []
-        
-        # 2. 遍历多尺度 LocalMamba
-        for i, stride_val in enumerate(self.scale_strides):
-            stride = torch.tensor(stride_val, dtype=points.dtype, device=points.device)
-            point2grid = self._get_point2grid(points, stride)
-            
-            # 调用 LocalMamba 层
-            local_feat, _ = self.local_mamba_levels[i](feat, point2grid)
-            
-            all_scale_feats.append(local_feat)
+    def _forward_one_window(
+        self,
+        points: torch.Tensor,
+        feats: torch.Tensor,
+    ) -> torch.Tensor:
+        scale_feats = []
 
-        
-        # 3. 特征拼接 [N, C * num_scales]
-        combined_feat = torch.cat(all_scale_feats, dim=-1)
-        
-        # 4. 分类头
-        out = self.head(combined_feat)
-        
+        for level, stride_value in enumerate(self.scale_strides):
+            stride = torch.tensor(
+                stride_value,
+                dtype=points.dtype,
+                device=points.device,
+            )
+
+            point2grid = self._get_point2grid(points, stride)
+            local_feat, _ = self.local_mamba_levels[level](feats, point2grid)
+            scale_feats.append(local_feat)
+
+        fused_feat = torch.cat(scale_feats, dim=-1)
+        out = self.head(fused_feat)
+
+        # 二分类场景下与 [N] 标签对齐
+        if self.num_classes == 1 and out.dim() == 2 and out.size(-1) == 1:
+            out = out.squeeze(-1)
+
+        return out
+
+    def forward(self, points: torch.Tensor, prev_state=None):
+        if points.numel() == 0:
+            return None, prev_state
+
+        # 先全局编码，再切 window，避免不同 window 单独编码造成输入分布变化。
+        feats = self.ts_encoder.encode_features(points)
+
+        if not self.use_window or self.window_size <= 0:
+            out = self._forward_one_window(points, feats)
+            return out, prev_state
+
+        sort_idx = torch.argsort(points[:, 2])
+        points_sorted = points[sort_idx]
+        feats_sorted = feats[sort_idx]
+
+        t = points_sorted[:, 2]
+        window_ids = torch.div(
+            t - t[0],
+            self.window_size,
+            rounding_mode="floor",
+        ).long()
+
+        _, counts = torch.unique_consecutive(
+            window_ids,
+            return_counts=True,
+        )
+
+        cum_counts = torch.zeros(
+            counts.numel() + 1,
+            dtype=torch.long,
+            device=points.device,
+        )
+        torch.cumsum(counts, dim=0, out=cum_counts[1:])
+
+        outputs = []
+        for i in range(counts.numel()):
+            start = cum_counts[i]
+            end = cum_counts[i + 1]
+
+            win_points = points_sorted[start:end]
+            win_feats = feats_sorted[start:end]
+
+            outputs.append(self._forward_one_window(win_points, win_feats))
+
+        out_sorted = torch.cat(outputs, dim=0)
+
+        reverse_idx = torch.empty_like(sort_idx)
+        reverse_idx[sort_idx] = torch.arange(points.size(0), device=points.device)
+
+        out = out_sorted[reverse_idx]
         return out, prev_state
