@@ -42,7 +42,7 @@ class GridMambaNet(nn.Module):
             getattr(cfg, "use_spatial_window_context", True)
         )
         self.spatial_context_stride = float(
-            getattr(cfg, "spatial_context_stride", 16.0)
+            getattr(cfg, "spatial_context_stride", 8.0)
         )
         self.spatial_context_use_conv = bool(
             getattr(cfg, "spatial_context_use_conv", True)

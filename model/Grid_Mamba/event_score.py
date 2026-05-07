@@ -47,7 +47,8 @@ def temporal_peak_filter_torch(
 
     for b in unique_bins:
         mask_b = (t_idx == b)
-        if not mask_b.any(): continue
+        if not mask_b.any():
+            continue
         
         idx_b = torch.where(mask_b)[0]
         t_now = t[idx_b].mean()
@@ -58,8 +59,8 @@ def temporal_peak_filter_torch(
         last_bin_time = t_now
 
         # 6.2 注入当前事件(每个事件在网格上贡献一个单位激活)
-        xb = x_idx[idx_b]
-        yb = y_idx[idx_b]
+        xb = x_idx_rel[idx_b]
+        yb = y_idx_rel[idx_b]
 
         ts_map.index_put_(
             (xb, yb),
