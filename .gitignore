@@ -10,3 +10,6 @@ utils/__pycache__/
 lib/hais_ops/build/
 model/Grid_Mamba/__pycache__
 whl/
+
+point_level_eval.csv
+predictions.txt

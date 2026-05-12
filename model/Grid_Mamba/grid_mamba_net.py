@@ -14,7 +14,7 @@ class GridMambaNet(nn.Module):
 
     核心设计：
     1. 使用全局 TSGraphEmbedding 编码事件点特征；
-    2. 在 forward 内部按时间 window 分段，降低单次局部建模的显存压力；
+    2. 在 forward 内部按时间 window 分段；
     3. 每个 window 内采用多尺度 3D grid 划分；
     4. 每个 window 先输出逐点 fused feature，而不是立即分类；
     5. 将每个 window 的 fused feature 聚合为低分辨率 spatial token map；
@@ -22,7 +22,6 @@ class GridMambaNet(nn.Module):
     7. 使用轻量 3x3 spatial conv 允许相邻空间 cell 交换历史上下文；
     8. 将空间上下文按点所在 cell 加回 fused feature，再送入 PointHead。
 
-    这个版本避免 per-grid dict memory，保留空间位置信息，同时保持较好的训练效率。
     """
 
     def __init__(self, cfg):
