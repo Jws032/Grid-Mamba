@@ -49,6 +49,7 @@ class GridMambaNet(nn.Module):
             hidden_dim=embed_dim,
             output_dim=embed_dim,
             sensor_size=sensor_size,
+            time_max=self.time_max,
             tau_t=getattr(cfg, "tau_t", 50),
             spatial_grid_size=getattr(cfg, "spatial_grid_size", 5),
             time_bin_size=getattr(cfg, "time_bin_size", 10.0),
@@ -56,11 +57,15 @@ class GridMambaNet(nn.Module):
         )
 
         # 多尺度 3D grid: [x_stride, y_stride, t_stride]
-        self.scale_strides = [
-            [32.0, 32.0, 100.0],
-            [64.0, 64.0, 200.0],
-            [128.0, 128.0, 400.0],
-        ]
+        self.scale_strides = getattr(
+            cfg,
+            "scale_strides",
+            [
+                [32.0, 32.0, 100.0],
+                [64.0, 64.0, 200.0],
+                [128.0, 128.0, 400.0],
+            ],
+        )
 
         local_mamba_kwargs = dict(
             d_model=embed_dim,

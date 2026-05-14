@@ -9,6 +9,7 @@ class TSGraphEmbedding(nn.Module):
                  hidden_dim=256, 
                  output_dim=256,
                  sensor_size=(260, 346),
+                 time_max=8000.0,
                  tau_t=50,
                  spatial_grid_size=5,
                  time_bin_size=10.0,
@@ -22,7 +23,7 @@ class TSGraphEmbedding(nn.Module):
         self.time_bin_size = time_bin_size
         self.use_global_density = use_global_density
         self.sensor_height, self.sensor_width = sensor_size
-        self.time_max = 8000.0 
+        self.time_max = float(time_max)
 
         # --- 新增：可学习的空间高斯卷积核 ---
         # 初始化为原来的高斯值以保证训练初期稳定性
