@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from mamba_ssm import Mamba
 
 
@@ -39,6 +40,14 @@ class SpatialWindowContext(nn.Module):
         )
         self.spatial_context_dropout = nn.Dropout(dropout)
 
+        self.spatial_pool_score = nn.Sequential(
+            nn.LayerNorm(fused_dim),
+            nn.Linear(fused_dim, 1),
+        )
+        nn.init.zeros_(self.spatial_pool_score[-1].weight)
+        nn.init.zeros_(self.spatial_pool_score[-1].bias)
+        self.spatial_pool_chunk_size = 65536
+
         # 深度可分离 3x3 conv：比普通 C->C 3x3 conv 更轻。
         self.spatial_context_conv = nn.Sequential(
             nn.Conv2d(
@@ -55,6 +64,9 @@ class SpatialWindowContext(nn.Module):
 
         # alpha 控制空间上下文注入强度。初始较小，避免一开始破坏 baseline。
         self.spatial_context_alpha = nn.Parameter(torch.tensor(alpha_init, dtype=torch.float32))
+
+    def _score_spatial_pool_weight(self, fused_feat: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(self.spatial_pool_score(fused_feat))
 
     def _get_spatial_cell_indices(self, points: torch.Tensor) -> torch.Tensor:
         """
@@ -84,7 +96,7 @@ class SpatialWindowContext(nn.Module):
         fused_feat: torch.Tensor,
     ) -> torch.Tensor:
         """
-        将一个 window 的逐点 fused feature 平均池化为低分辨率 spatial token map。
+        将一个 window 的逐点 fused feature 加权池化为低分辨率 spatial token map。
 
         points:     [N_i, 3]
         fused_feat: [N_i, C]
@@ -102,23 +114,31 @@ class SpatialWindowContext(nn.Module):
             device=device,
             dtype=fused_feat.dtype,
         )
-        counts = torch.zeros(
+        weight_sums = torch.zeros(
             num_cells,
             1,
             device=device,
             dtype=fused_feat.dtype,
         )
 
-        sums.index_add_(0, cell_idx, fused_feat)
-        ones = torch.ones(
-            cell_idx.numel(),
-            1,
-            device=device,
-            dtype=fused_feat.dtype,
-        )
-        counts.index_add_(0, cell_idx, ones)
+        for start in range(0, cell_idx.numel(), self.spatial_pool_chunk_size):
+            end = min(start + self.spatial_pool_chunk_size, cell_idx.numel())
+            feat_chunk = fused_feat[start:end]
+            cell_idx_chunk = cell_idx[start:end]
 
-        tokens = sums / counts.clamp(min=1.0)
+            if torch.is_grad_enabled() and feat_chunk.requires_grad:
+                weight = checkpoint(
+                    self._score_spatial_pool_weight,
+                    feat_chunk,
+                    use_reentrant=False,
+                )
+            else:
+                weight = self._score_spatial_pool_weight(feat_chunk)
+
+            sums.index_add_(0, cell_idx_chunk, feat_chunk * weight)
+            weight_sums.index_add_(0, cell_idx_chunk, weight)
+
+        tokens = sums / weight_sums.clamp(min=1e-6)
         return tokens.view(self.spatial_token_h, self.spatial_token_w, channels)
 
     def forward(
