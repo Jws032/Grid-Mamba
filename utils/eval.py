@@ -25,8 +25,12 @@ class evalute():
         self.frame_num += int((ts.max() - ts.min()) / self.pd_detT)
         for i in range(int((ts.max() - ts.min()) / self.pd_detT + 1)):
             t_range = (ts > i * self.pd_detT) * (ts < (i + 1) * self.pd_detT)
+            if ev_locs.shape[1] == 3:
+                ev_locs_xyz = ev_locs
+            else:
+                ev_locs_xyz = ev_locs[:, 1:4]
             idx_frame, preds_frame, label_frame, ev_locs_frame = idx[t_range], preds[t_range], label[t_range], \
-                ev_locs[:, 1:4][t_range]
+                ev_locs_xyz[t_range]
             preds_frame_ori = preds_frame.clone()
             idx_list_frame = set(idx_frame)
             false_mask = np.zeros((260, 346), dtype=np.uint8)

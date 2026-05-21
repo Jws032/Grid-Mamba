@@ -56,7 +56,7 @@ DATA:
   res: [346,260]
 
 TRAIN:
-  epochs: 100
+  epochs: 50
   batch_size: 1
   train_workers: 8
   optim: Adam # Adam or SGD
