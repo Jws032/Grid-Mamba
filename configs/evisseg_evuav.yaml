@@ -39,6 +39,8 @@ GRID_MAMBA:
   small_bucket_bs: 128
   mid_bucket_bs: 64
   large_bucket_bs: 16
+  use_local_mamba_checkpoint: True
+  local_mamba_checkpoint_levels: [0]
 
   # SpatialWindowContext
   spatial_context_stride: 8.0
@@ -48,6 +50,12 @@ GRID_MAMBA:
   spatial_context_expand: 1
   spatial_context_dropout: 0.1
   spatial_context_alpha_init: 0.1
+  use_stream_mamba_checkpoint: False
+  use_temporal_cell_diffusion: True
+  temporal_cell_diffusion_alpha_init: 0.1
+  temporal_cell_diffusion_gate_bias: -2.0
+  temporal_cell_diffusion_kernel_size: 3
+  temporal_cell_diffusion_source: prev_context
 
 DATA:
   input_channel: 4

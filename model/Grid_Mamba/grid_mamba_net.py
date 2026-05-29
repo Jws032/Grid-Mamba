@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 from .local_mamba_block import LocalMambaBlock
 from .point_head import PointHead
@@ -34,6 +35,17 @@ class GridMambaNet(nn.Module):
         self.window_size = float(getattr(cfg, "window_size", 400.0))
         self.use_window = bool(getattr(cfg, "use_window", True))
         self.use_grid_pos_encoding = bool(getattr(cfg, "use_grid_pos_encoding", True))
+        self.use_local_mamba_checkpoint = bool(
+            getattr(cfg, "use_local_mamba_checkpoint", True)
+        )
+        checkpoint_levels = getattr(cfg, "local_mamba_checkpoint_levels", None)
+        if checkpoint_levels is None:
+            self.local_mamba_checkpoint_levels = None
+        else:
+            self.local_mamba_checkpoint_levels = {
+                int(level)
+                for level in checkpoint_levels
+            }
 
         # 空间窗口上下文开关。关闭后退回原 baseline 的 window 独立输出逻辑。
         self.use_spatial_window_context = bool(
@@ -112,6 +124,36 @@ class GridMambaNet(nn.Module):
                 dropout=getattr(cfg, "spatial_context_dropout", 0.1),
                 use_conv=getattr(cfg, "spatial_context_use_conv", True),
                 alpha_init=getattr(cfg, "spatial_context_alpha_init", 0.1),
+                use_stream_mamba_checkpoint=getattr(
+                    cfg,
+                    "use_stream_mamba_checkpoint",
+                    True,
+                ),
+                use_temporal_cell_diffusion=getattr(
+                    cfg,
+                    "use_temporal_cell_diffusion",
+                    False,
+                ),
+                temporal_cell_diffusion_alpha_init=getattr(
+                    cfg,
+                    "temporal_cell_diffusion_alpha_init",
+                    0.1,
+                ),
+                temporal_cell_diffusion_gate_bias=getattr(
+                    cfg,
+                    "temporal_cell_diffusion_gate_bias",
+                    -2.0,
+                ),
+                temporal_cell_diffusion_kernel_size=getattr(
+                    cfg,
+                    "temporal_cell_diffusion_kernel_size",
+                    3,
+                ),
+                temporal_cell_diffusion_source=getattr(
+                    cfg,
+                    "temporal_cell_diffusion_source",
+                    "prev_context",
+                ),
             )
         else:
             self.spatial_window_context = None
@@ -211,7 +253,23 @@ class GridMambaNet(nn.Module):
             else:
                 mamba_input = feats
 
-            local_feat, _ = self.local_mamba_levels[level](mamba_input, point2grid)
+            if (
+                self.use_local_mamba_checkpoint
+                and (
+                    self.local_mamba_checkpoint_levels is None
+                    or level in self.local_mamba_checkpoint_levels
+                )
+                and torch.is_grad_enabled()
+                and mamba_input.requires_grad
+            ):
+                local_feat = checkpoint(
+                    lambda x, p, module=self.local_mamba_levels[level]: module(x, p)[0],
+                    mamba_input,
+                    point2grid,
+                    use_reentrant=False,
+                )
+            else:
+                local_feat, _ = self.local_mamba_levels[level](mamba_input, point2grid)
             scale_feats.append(local_feat)
 
         return torch.cat(scale_feats, dim=-1)
@@ -280,8 +338,8 @@ class GridMambaNet(nn.Module):
 
             out_sorted = torch.cat(outputs, dim=0)
         else:
-            window_points = []
-            window_fused_feats = []
+            outputs = []
+            spatial_context_state = prev_state
 
             for i in range(counts.numel()):
                 start = cum_counts[i]
@@ -291,19 +349,15 @@ class GridMambaNet(nn.Module):
                 win_feats = feats_sorted[start:end]
 
                 fused_feat = self._forward_one_window_features(win_points, win_feats)
-                window_points.append(win_points)
-                window_fused_feats.append(fused_feat)
+                fused_feat, spatial_context_state = self.spatial_window_context.step(
+                    win_points,
+                    fused_feat,
+                    spatial_context_state,
+                )
+                outputs.append(self._classify_features(fused_feat))
 
-            window_fused_feats = self.spatial_window_context(
-                window_points,
-                window_fused_feats,
-            )
-
-            outputs = [
-                self._classify_features(fused_feat)
-                for fused_feat in window_fused_feats
-            ]
             out_sorted = torch.cat(outputs, dim=0)
+            prev_state = spatial_context_state
 
         reverse_idx = torch.empty_like(sort_idx)
         reverse_idx[sort_idx] = torch.arange(points.size(0), device=points.device)

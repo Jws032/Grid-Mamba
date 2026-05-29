@@ -1,13 +1,14 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from mamba_ssm import Mamba
 
 
 class SpatialWindowContext(nn.Module):
     """
-    Spatial Window Context：先沿时间建模，再做轻量空间传播。
+    Spatial Window Context：支持离线 SWC 和逐 window 流式 SWC。
     """
 
     def __init__(
@@ -21,12 +22,29 @@ class SpatialWindowContext(nn.Module):
         dropout: float = 0.1,
         use_conv: bool = True,
         alpha_init: float = 0.1,
+        use_stream_mamba_checkpoint: bool = True,
+        use_temporal_cell_diffusion: bool = False,
+        temporal_cell_diffusion_alpha_init: float = 0.1,
+        temporal_cell_diffusion_gate_bias: float = -2.0,
+        temporal_cell_diffusion_kernel_size: int = 3,
+        temporal_cell_diffusion_source: str = "prev_context",
     ):
         super().__init__()
 
         self.sensor_height, self.sensor_width = sensor_size
         self.spatial_context_stride = float(spatial_context_stride)
         self.spatial_context_use_conv = bool(use_conv)
+        self.use_stream_mamba_checkpoint = bool(use_stream_mamba_checkpoint)
+        self.use_temporal_cell_diffusion = bool(use_temporal_cell_diffusion)
+        self.temporal_cell_diffusion_source = str(temporal_cell_diffusion_source)
+
+        if self.temporal_cell_diffusion_source not in {"prev_context", "prev_token"}:
+            raise ValueError(
+                "temporal_cell_diffusion_source must be 'prev_context' or 'prev_token'"
+            )
+
+        if temporal_cell_diffusion_kernel_size % 2 == 0:
+            raise ValueError("temporal_cell_diffusion_kernel_size must be odd")
 
         self.spatial_token_h = int(math.ceil(self.sensor_height / self.spatial_context_stride))
         self.spatial_token_w = int(math.ceil(self.sensor_width / self.spatial_context_stride))
@@ -65,8 +83,226 @@ class SpatialWindowContext(nn.Module):
         # alpha 控制空间上下文注入强度。初始较小，避免一开始破坏 baseline。
         self.spatial_context_alpha = nn.Parameter(torch.tensor(alpha_init, dtype=torch.float32))
 
+        if self.use_temporal_cell_diffusion:
+            diffusion_padding = temporal_cell_diffusion_kernel_size // 2
+            self.temporal_cell_diffusion_conv = nn.Sequential(
+                nn.Conv2d(
+                    fused_dim,
+                    fused_dim,
+                    kernel_size=temporal_cell_diffusion_kernel_size,
+                    padding=diffusion_padding,
+                    groups=fused_dim,
+                    bias=False,
+                ),
+                nn.GELU(),
+                nn.Conv2d(fused_dim, fused_dim, kernel_size=1, bias=True),
+            )
+            self.temporal_cell_diffusion_gate = nn.Conv2d(
+                fused_dim * 2,
+                fused_dim,
+                kernel_size=1,
+                bias=True,
+            )
+            nn.init.zeros_(self.temporal_cell_diffusion_gate.weight)
+            nn.init.constant_(
+                self.temporal_cell_diffusion_gate.bias,
+                temporal_cell_diffusion_gate_bias,
+            )
+            self.temporal_cell_diffusion_alpha = nn.Parameter(
+                torch.tensor(
+                    temporal_cell_diffusion_alpha_init,
+                    dtype=torch.float32,
+                )
+            )
+        else:
+            self.temporal_cell_diffusion_conv = None
+            self.temporal_cell_diffusion_gate = None
+            self.temporal_cell_diffusion_alpha = None
+
     def _score_spatial_pool_weight(self, fused_feat: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(self.spatial_pool_score(fused_feat))
+
+    def _init_stream_state(self, reference: torch.Tensor) -> dict:
+        num_cells = self.spatial_token_h * self.spatial_token_w
+        mamba = self.spatial_context_mamba
+        conv_dtype = reference.dtype
+        ssm_dtype = mamba.dt_proj.weight.dtype
+
+        return {
+            "conv_state": torch.zeros(
+                num_cells,
+                mamba.d_inner,
+                mamba.d_conv,
+                device=reference.device,
+                dtype=conv_dtype,
+            ),
+            "ssm_state": torch.zeros(
+                num_cells,
+                mamba.d_inner,
+                mamba.d_state,
+                device=reference.device,
+                dtype=ssm_dtype,
+            ),
+            "prev_context_map": None,
+            "prev_token_map": None,
+        }
+
+    def _ensure_stream_state(self, state, reference: torch.Tensor) -> dict:
+        num_cells = self.spatial_token_h * self.spatial_token_w
+        mamba = self.spatial_context_mamba
+        expected_conv_shape = (num_cells, mamba.d_inner, mamba.d_conv)
+        expected_ssm_shape = (num_cells, mamba.d_inner, mamba.d_state)
+
+        if state is None or not isinstance(state, dict):
+            return self._init_stream_state(reference)
+
+        conv_state = state.get("conv_state")
+        ssm_state = state.get("ssm_state")
+        if (
+            conv_state is None
+            or ssm_state is None
+            or tuple(conv_state.shape) != expected_conv_shape
+            or tuple(ssm_state.shape) != expected_ssm_shape
+            or conv_state.device != reference.device
+            or ssm_state.device != reference.device
+            or conv_state.dtype != reference.dtype
+            or ssm_state.dtype != self.spatial_context_mamba.dt_proj.weight.dtype
+        ):
+            return self._init_stream_state(reference)
+
+        return state
+
+    def _mamba_step_train(
+        self,
+        hidden_states: torch.Tensor,
+        conv_state: torch.Tensor,
+        ssm_state: torch.Tensor,
+    ):
+        """
+        Differentiable single-token Mamba step.
+
+        This mirrors mamba_ssm.Mamba.step, but avoids in-place state updates so
+        full BPTT across windows remains valid during training.
+        """
+        mamba = self.spatial_context_mamba
+        dtype = hidden_states.dtype
+
+        xz = mamba.in_proj(hidden_states.squeeze(1))
+        x, z = xz.chunk(2, dim=-1)
+
+        conv_state = torch.cat([conv_state[:, :, 1:], x.unsqueeze(-1)], dim=-1)
+        conv_weight = mamba.conv1d.weight.squeeze(1)
+        x = torch.sum(conv_state * conv_weight.unsqueeze(0), dim=-1)
+        if mamba.conv1d.bias is not None:
+            x = x + mamba.conv1d.bias
+        x = mamba.act(x).to(dtype=dtype)
+
+        x_db = mamba.x_proj(x)
+        dt, b_state, c_state = torch.split(
+            x_db,
+            [mamba.dt_rank, mamba.d_state, mamba.d_state],
+            dim=-1,
+        )
+        dt = F.linear(dt, mamba.dt_proj.weight)
+        dt = F.softplus(dt + mamba.dt_proj.bias.to(dtype=dt.dtype))
+
+        a_state = -torch.exp(mamba.A_log.float())
+        d_a = torch.exp(torch.einsum("bd,dn->bdn", dt, a_state))
+        d_b = torch.einsum("bd,bn->bdn", dt, b_state)
+        ssm_state = ssm_state * d_a + x.unsqueeze(-1) * d_b
+
+        y = torch.einsum("bdn,bn->bd", ssm_state.to(dtype), c_state)
+        y = y + mamba.D.to(dtype) * x
+        y = y * mamba.act(z)
+
+        out = mamba.out_proj(y)
+        return out.unsqueeze(1), conv_state, ssm_state
+
+    def _mamba_step_stream(
+        self,
+        hidden_states: torch.Tensor,
+        conv_state: torch.Tensor,
+        ssm_state: torch.Tensor,
+    ):
+        use_train_step = torch.is_grad_enabled() and hidden_states.requires_grad
+
+        if use_train_step and self.use_stream_mamba_checkpoint:
+            return checkpoint(
+                self._mamba_step_train,
+                hidden_states,
+                conv_state,
+                ssm_state,
+                use_reentrant=False,
+            )
+
+        if use_train_step:
+            return self._mamba_step_train(hidden_states, conv_state, ssm_state)
+
+        if not hidden_states.is_cuda:
+            return self._mamba_step_train(hidden_states, conv_state, ssm_state)
+
+        return self.spatial_context_mamba.step(hidden_states, conv_state, ssm_state)
+
+    def _apply_temporal_cell_diffusion(
+        self,
+        token_map: torch.Tensor,
+        state: dict,
+    ) -> torch.Tensor:
+        if not self.use_temporal_cell_diffusion:
+            return token_map
+
+        source_key = (
+            "prev_context_map"
+            if self.temporal_cell_diffusion_source == "prev_context"
+            else "prev_token_map"
+        )
+        prev_map = state.get(source_key)
+        if prev_map is None or tuple(prev_map.shape) != tuple(token_map.shape):
+            return token_map
+
+        token_nchw = token_map.permute(2, 0, 1).unsqueeze(0).contiguous()
+        prev_nchw = prev_map.permute(2, 0, 1).unsqueeze(0).contiguous()
+
+        diffused_prev = self.temporal_cell_diffusion_conv(prev_nchw)
+        gate = torch.sigmoid(
+            self.temporal_cell_diffusion_gate(
+                torch.cat([token_nchw, diffused_prev], dim=1)
+            )
+        )
+
+        alpha = self.temporal_cell_diffusion_alpha.to(dtype=token_map.dtype)
+        token_nchw = token_nchw + alpha * gate * diffused_prev
+
+        return token_nchw.squeeze(0).permute(1, 2, 0).contiguous()
+
+    def _run_stream_step(self, token_map: torch.Tensor, state: dict):
+        height, width, channels = token_map.shape
+
+        temporal_token = token_map.reshape(height * width, channels)
+        temporal_token = self.spatial_context_norm(temporal_token).unsqueeze(1)
+
+        context_token, conv_state, ssm_state = self._mamba_step_stream(
+            temporal_token,
+            state["conv_state"],
+            state["ssm_state"],
+        )
+        context_token = self.spatial_context_dropout(context_token).squeeze(1)
+
+        context_map = context_token.reshape(height, width, channels)
+
+        if self.spatial_context_use_conv:
+            context_nchw = context_map.permute(2, 0, 1).unsqueeze(0).contiguous()
+            context_nchw = self.spatial_context_conv(context_nchw)
+            context_map = context_nchw.squeeze(0).permute(1, 2, 0).contiguous()
+
+        new_state = {
+            "conv_state": conv_state,
+            "ssm_state": ssm_state,
+            "prev_context_map": context_map,
+            "prev_token_map": token_map,
+        }
+
+        return context_map, new_state
 
     def _get_spatial_cell_indices(self, points: torch.Tensor) -> torch.Tensor:
         """
@@ -140,6 +376,47 @@ class SpatialWindowContext(nn.Module):
 
         tokens = sums / weight_sums.clamp(min=1e-6)
         return tokens.view(self.spatial_token_h, self.spatial_token_w, channels)
+
+    def step(
+        self,
+        points: torch.Tensor,
+        fused_feat: torch.Tensor,
+        state=None,
+    ):
+        """
+        对单个 window 更新一次 SWC state，并把当前 context 回填到点特征。
+        """
+        state = self._ensure_stream_state(state, fused_feat)
+
+        token_map = self._pool_window_to_spatial_map(points, fused_feat)
+        token_map = self._apply_temporal_cell_diffusion(token_map, state)
+        context_map, state = self._run_stream_step(token_map, state)
+
+        channels = fused_feat.size(-1)
+        cell_idx = self._get_spatial_cell_indices(points)
+        point_context = context_map.reshape(-1, channels)[cell_idx]
+
+        alpha = self.spatial_context_alpha.to(dtype=fused_feat.dtype)
+        enhanced_feat = fused_feat + alpha * point_context
+
+        return enhanced_feat, state
+
+    def forward_streaming(
+        self,
+        window_points: list,
+        window_feats: list,
+        state=None,
+    ):
+        """
+        逐 window 运行 SWC。训练时保留完整计算图，推理时可复用返回的 state。
+        """
+        enhanced_feats = []
+
+        for points, feat in zip(window_points, window_feats):
+            enhanced_feat, state = self.step(points, feat, state)
+            enhanced_feats.append(enhanced_feat)
+
+        return enhanced_feats, state
 
     def forward(
         self,
