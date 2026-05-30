@@ -154,6 +154,26 @@ class GridMambaNet(nn.Module):
                     "temporal_cell_diffusion_source",
                     "prev_context",
                 ),
+                temporal_context_diffusion_alpha_init=getattr(
+                    cfg,
+                    "temporal_context_diffusion_alpha_init",
+                    getattr(cfg, "temporal_cell_diffusion_alpha_init", 0.1),
+                ),
+                temporal_context_diffusion_gate_bias=getattr(
+                    cfg,
+                    "temporal_context_diffusion_gate_bias",
+                    getattr(cfg, "temporal_cell_diffusion_gate_bias", -2.0),
+                ),
+                temporal_token_diffusion_alpha_init=getattr(
+                    cfg,
+                    "temporal_token_diffusion_alpha_init",
+                    0.05,
+                ),
+                temporal_token_diffusion_gate_bias=getattr(
+                    cfg,
+                    "temporal_token_diffusion_gate_bias",
+                    -3.0,
+                ),
             )
         else:
             self.spatial_window_context = None

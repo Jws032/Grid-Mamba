@@ -52,10 +52,12 @@ GRID_MAMBA:
   spatial_context_alpha_init: 0.1
   use_stream_mamba_checkpoint: False
   use_temporal_cell_diffusion: True
-  temporal_cell_diffusion_alpha_init: 0.1
-  temporal_cell_diffusion_gate_bias: -2.0
   temporal_cell_diffusion_kernel_size: 3
-  temporal_cell_diffusion_source: prev_context
+  temporal_cell_diffusion_source: dual
+  temporal_context_diffusion_alpha_init: 0.1
+  temporal_context_diffusion_gate_bias: -2.0
+  temporal_token_diffusion_alpha_init: 0.05
+  temporal_token_diffusion_gate_bias: -3.0
 
 DATA:
   input_channel: 4
@@ -72,7 +74,7 @@ TRAIN:
   k: 3
   t: 5
   max_events_num : 700000
-  model_save_root: save_model
+  model_save_root: save_model/motion_e7_400_k3_dual_source
 
 TEST:
   vis: False
@@ -81,7 +83,4 @@ TEST:
   pd_detT: 50
   correct_thresh: 0.0001
   save: True
-  model_path: save_model/best_iou_seed37.pt
-
-
-
+  model_path: save_model/motion_e7_400_k3_dual_source/best_iou_seed37.pt

@@ -28,6 +28,10 @@ class SpatialWindowContext(nn.Module):
         temporal_cell_diffusion_gate_bias: float = -2.0,
         temporal_cell_diffusion_kernel_size: int = 3,
         temporal_cell_diffusion_source: str = "prev_context",
+        temporal_context_diffusion_alpha_init: float = 0.1,
+        temporal_context_diffusion_gate_bias: float = -2.0,
+        temporal_token_diffusion_alpha_init: float = 0.05,
+        temporal_token_diffusion_gate_bias: float = -3.0,
     ):
         super().__init__()
 
@@ -38,9 +42,14 @@ class SpatialWindowContext(nn.Module):
         self.use_temporal_cell_diffusion = bool(use_temporal_cell_diffusion)
         self.temporal_cell_diffusion_source = str(temporal_cell_diffusion_source)
 
-        if self.temporal_cell_diffusion_source not in {"prev_context", "prev_token"}:
+        if self.temporal_cell_diffusion_source not in {
+            "prev_context",
+            "prev_token",
+            "dual",
+        }:
             raise ValueError(
-                "temporal_cell_diffusion_source must be 'prev_context' or 'prev_token'"
+                "temporal_cell_diffusion_source must be 'prev_context', "
+                "'prev_token', or 'dual'"
             )
 
         if temporal_cell_diffusion_kernel_size % 2 == 0:
@@ -83,9 +92,9 @@ class SpatialWindowContext(nn.Module):
         # alpha 控制空间上下文注入强度。初始较小，避免一开始破坏 baseline。
         self.spatial_context_alpha = nn.Parameter(torch.tensor(alpha_init, dtype=torch.float32))
 
-        if self.use_temporal_cell_diffusion:
+        def make_diffusion_conv():
             diffusion_padding = temporal_cell_diffusion_kernel_size // 2
-            self.temporal_cell_diffusion_conv = nn.Sequential(
+            return nn.Sequential(
                 nn.Conv2d(
                     fused_dim,
                     fused_dim,
@@ -97,16 +106,53 @@ class SpatialWindowContext(nn.Module):
                 nn.GELU(),
                 nn.Conv2d(fused_dim, fused_dim, kernel_size=1, bias=True),
             )
-            self.temporal_cell_diffusion_gate = nn.Conv2d(
+
+        def make_diffusion_gate(gate_bias: float):
+            gate = nn.Conv2d(
                 fused_dim * 2,
                 fused_dim,
                 kernel_size=1,
                 bias=True,
             )
-            nn.init.zeros_(self.temporal_cell_diffusion_gate.weight)
-            nn.init.constant_(
-                self.temporal_cell_diffusion_gate.bias,
-                temporal_cell_diffusion_gate_bias,
+            nn.init.zeros_(gate.weight)
+            nn.init.constant_(gate.bias, gate_bias)
+            return gate
+
+        self.temporal_cell_diffusion_conv = None
+        self.temporal_cell_diffusion_gate = None
+        self.temporal_cell_diffusion_alpha = None
+        self.temporal_context_diffusion_conv = None
+        self.temporal_context_diffusion_gate = None
+        self.temporal_context_diffusion_alpha = None
+        self.temporal_token_diffusion_conv = None
+        self.temporal_token_diffusion_gate = None
+        self.temporal_token_diffusion_alpha = None
+
+        if self.use_temporal_cell_diffusion and self.temporal_cell_diffusion_source == "dual":
+            self.temporal_context_diffusion_conv = make_diffusion_conv()
+            self.temporal_context_diffusion_gate = make_diffusion_gate(
+                temporal_context_diffusion_gate_bias
+            )
+            self.temporal_context_diffusion_alpha = nn.Parameter(
+                torch.tensor(
+                    temporal_context_diffusion_alpha_init,
+                    dtype=torch.float32,
+                )
+            )
+            self.temporal_token_diffusion_conv = make_diffusion_conv()
+            self.temporal_token_diffusion_gate = make_diffusion_gate(
+                temporal_token_diffusion_gate_bias
+            )
+            self.temporal_token_diffusion_alpha = nn.Parameter(
+                torch.tensor(
+                    temporal_token_diffusion_alpha_init,
+                    dtype=torch.float32,
+                )
+            )
+        elif self.use_temporal_cell_diffusion:
+            self.temporal_cell_diffusion_conv = make_diffusion_conv()
+            self.temporal_cell_diffusion_gate = make_diffusion_gate(
+                temporal_cell_diffusion_gate_bias
             )
             self.temporal_cell_diffusion_alpha = nn.Parameter(
                 torch.tensor(
@@ -114,10 +160,6 @@ class SpatialWindowContext(nn.Module):
                     dtype=torch.float32,
                 )
             )
-        else:
-            self.temporal_cell_diffusion_conv = None
-            self.temporal_cell_diffusion_gate = None
-            self.temporal_cell_diffusion_alpha = None
 
     def _score_spatial_pool_weight(self, fused_feat: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(self.spatial_pool_score(fused_feat))
@@ -145,6 +187,7 @@ class SpatialWindowContext(nn.Module):
             ),
             "prev_context_map": None,
             "prev_token_map": None,
+            "prev_raw_token_map": None,
         }
 
     def _ensure_stream_state(self, state, reference: torch.Tensor) -> dict:
@@ -251,6 +294,16 @@ class SpatialWindowContext(nn.Module):
         if not self.use_temporal_cell_diffusion:
             return token_map
 
+        token_nchw = token_map.permute(2, 0, 1).unsqueeze(0).contiguous()
+
+        if self.temporal_cell_diffusion_source == "dual":
+            token_nchw = self._apply_dual_temporal_cell_diffusion(
+                token_nchw,
+                token_map,
+                state,
+            )
+            return token_nchw.squeeze(0).permute(1, 2, 0).contiguous()
+
         source_key = (
             "prev_context_map"
             if self.temporal_cell_diffusion_source == "prev_context"
@@ -260,22 +313,76 @@ class SpatialWindowContext(nn.Module):
         if prev_map is None or tuple(prev_map.shape) != tuple(token_map.shape):
             return token_map
 
-        token_nchw = token_map.permute(2, 0, 1).unsqueeze(0).contiguous()
         prev_nchw = prev_map.permute(2, 0, 1).unsqueeze(0).contiguous()
 
-        diffused_prev = self.temporal_cell_diffusion_conv(prev_nchw)
-        gate = torch.sigmoid(
-            self.temporal_cell_diffusion_gate(
-                torch.cat([token_nchw, diffused_prev], dim=1)
-            )
+        token_nchw = self._apply_single_temporal_diffusion_branch(
+            token_nchw,
+            prev_nchw,
+            self.temporal_cell_diffusion_conv,
+            self.temporal_cell_diffusion_gate,
+            self.temporal_cell_diffusion_alpha,
         )
-
-        alpha = self.temporal_cell_diffusion_alpha.to(dtype=token_map.dtype)
-        token_nchw = token_nchw + alpha * gate * diffused_prev
 
         return token_nchw.squeeze(0).permute(1, 2, 0).contiguous()
 
-    def _run_stream_step(self, token_map: torch.Tensor, state: dict):
+    def _apply_single_temporal_diffusion_branch(
+        self,
+        token_nchw: torch.Tensor,
+        prev_nchw: torch.Tensor,
+        diffusion_conv: nn.Module,
+        diffusion_gate: nn.Module,
+        diffusion_alpha: torch.Tensor,
+    ) -> torch.Tensor:
+        diffused_prev = diffusion_conv(prev_nchw)
+        gate = torch.sigmoid(
+            diffusion_gate(torch.cat([token_nchw, diffused_prev], dim=1))
+        )
+        alpha = diffusion_alpha.to(dtype=token_nchw.dtype)
+        return token_nchw + alpha * gate * diffused_prev
+
+    def _apply_dual_temporal_cell_diffusion(
+        self,
+        token_nchw: torch.Tensor,
+        token_map: torch.Tensor,
+        state: dict,
+    ) -> torch.Tensor:
+        ctx_map = state.get("prev_context_map")
+        raw_token_map = state.get("prev_raw_token_map")
+        if raw_token_map is None:
+            raw_token_map = state.get("prev_token_map")
+
+        residual = torch.zeros_like(token_nchw)
+
+        if ctx_map is not None and tuple(ctx_map.shape) == tuple(token_map.shape):
+            ctx_nchw = ctx_map.permute(2, 0, 1).unsqueeze(0).contiguous()
+            ctx_updated = self._apply_single_temporal_diffusion_branch(
+                token_nchw,
+                ctx_nchw,
+                self.temporal_context_diffusion_conv,
+                self.temporal_context_diffusion_gate,
+                self.temporal_context_diffusion_alpha,
+            )
+            residual = residual + (ctx_updated - token_nchw)
+
+        if raw_token_map is not None and tuple(raw_token_map.shape) == tuple(token_map.shape):
+            tok_nchw = raw_token_map.permute(2, 0, 1).unsqueeze(0).contiguous()
+            tok_updated = self._apply_single_temporal_diffusion_branch(
+                token_nchw,
+                tok_nchw,
+                self.temporal_token_diffusion_conv,
+                self.temporal_token_diffusion_gate,
+                self.temporal_token_diffusion_alpha,
+            )
+            residual = residual + (tok_updated - token_nchw)
+
+        return token_nchw + residual
+
+    def _run_stream_step(
+        self,
+        token_map: torch.Tensor,
+        state: dict,
+        raw_token_map: torch.Tensor = None,
+    ):
         height, width, channels = token_map.shape
 
         temporal_token = token_map.reshape(height * width, channels)
@@ -295,11 +402,14 @@ class SpatialWindowContext(nn.Module):
             context_nchw = self.spatial_context_conv(context_nchw)
             context_map = context_nchw.squeeze(0).permute(1, 2, 0).contiguous()
 
+        # prev_token_map keeps the effective token for old single-source ablations;
+        # prev_raw_token_map drives the dual-source token branch.
         new_state = {
             "conv_state": conv_state,
             "ssm_state": ssm_state,
             "prev_context_map": context_map,
             "prev_token_map": token_map,
+            "prev_raw_token_map": raw_token_map if raw_token_map is not None else token_map,
         }
 
         return context_map, new_state
@@ -388,9 +498,9 @@ class SpatialWindowContext(nn.Module):
         """
         state = self._ensure_stream_state(state, fused_feat)
 
-        token_map = self._pool_window_to_spatial_map(points, fused_feat)
-        token_map = self._apply_temporal_cell_diffusion(token_map, state)
-        context_map, state = self._run_stream_step(token_map, state)
+        raw_token_map = self._pool_window_to_spatial_map(points, fused_feat)
+        token_map = self._apply_temporal_cell_diffusion(raw_token_map, state)
+        context_map, state = self._run_stream_step(token_map, state, raw_token_map)
 
         channels = fused_feat.size(-1)
         cell_idx = self._get_spatial_cell_indices(points)
