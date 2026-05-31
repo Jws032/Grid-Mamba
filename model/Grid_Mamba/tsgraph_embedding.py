@@ -53,17 +53,19 @@ class TSGraphEmbedding(nn.Module):
         """
         Args: points [N, 3] (x, y, t)
         """
-        # 1. 计算事件分数 (传入可学习卷积核)
-        # 注意：此处不再转为 numpy，以保留梯度流
-        event_scores = temporal_peak_filter_torch(
-            points=points,
-            kernel=self.learnable_kernel,
-            sensor_size=self.sensor_size,
-            tau_t=self.tau_t,
-            spatial_grid_size=self.spatial_grid_size,
-            time_bin_size=self.time_bin_size,
-            use_global_density=self.use_global_density
-        )
+        # 1. 计算事件分数。该路径包含 index_put_/conv2d，AMP 下强制 FP32
+        # 可避免散射写入和卷积输出 dtype 不一致。
+        autocast_device = points.device.type if points.device.type in {"cuda", "cpu"} else "cpu"
+        with torch.autocast(device_type=autocast_device, enabled=False):
+            event_scores = temporal_peak_filter_torch(
+                points=points.float(),
+                kernel=self.learnable_kernel.float(),
+                sensor_size=self.sensor_size,
+                tau_t=self.tau_t,
+                spatial_grid_size=self.spatial_grid_size,
+                time_bin_size=self.time_bin_size,
+                use_global_density=self.use_global_density
+            )
 
         # 2. 坐标归一化
         normalized_points = self._normalize_coordinates(points)

@@ -208,8 +208,6 @@ class SpatialWindowContext(nn.Module):
             or tuple(ssm_state.shape) != expected_ssm_shape
             or conv_state.device != reference.device
             or ssm_state.device != reference.device
-            or conv_state.dtype != reference.dtype
-            or ssm_state.dtype != self.spatial_context_mamba.dt_proj.weight.dtype
         ):
             return self._init_stream_state(reference)
 
@@ -284,7 +282,17 @@ class SpatialWindowContext(nn.Module):
         if not hidden_states.is_cuda:
             return self._mamba_step_train(hidden_states, conv_state, ssm_state)
 
-        return self.spatial_context_mamba.step(hidden_states, conv_state, ssm_state)
+        # The CUDA inference kernels used by Mamba.step require the convolution
+        # cache and projected input to have exactly the same dtype. Under BF16
+        # autocast, the surrounding network may produce mixed FP32/BF16 tensors,
+        # so run this inference-only step in FP32 and keep the stream state stable
+        # across windows instead of reinitializing it on dtype differences.
+        with torch.autocast(device_type="cuda", enabled=False):
+            return self.spatial_context_mamba.step(
+                hidden_states.float(),
+                conv_state.float(),
+                ssm_state.float(),
+            )
 
     def _apply_temporal_cell_diffusion(
         self,
@@ -440,6 +448,7 @@ class SpatialWindowContext(nn.Module):
         self,
         points: torch.Tensor,
         fused_feat: torch.Tensor,
+        cell_idx: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         将一个 window 的逐点 fused feature 加权池化为低分辨率 spatial token map。
@@ -452,7 +461,8 @@ class SpatialWindowContext(nn.Module):
         channels = fused_feat.size(-1)
         device = fused_feat.device
 
-        cell_idx = self._get_spatial_cell_indices(points)
+        if cell_idx is None:
+            cell_idx = self._get_spatial_cell_indices(points)
 
         sums = torch.zeros(
             num_cells,
@@ -480,6 +490,7 @@ class SpatialWindowContext(nn.Module):
                 )
             else:
                 weight = self._score_spatial_pool_weight(feat_chunk)
+            weight = weight.to(dtype=fused_feat.dtype)
 
             sums.index_add_(0, cell_idx_chunk, feat_chunk * weight)
             weight_sums.index_add_(0, cell_idx_chunk, weight)
@@ -492,18 +503,25 @@ class SpatialWindowContext(nn.Module):
         points: torch.Tensor,
         fused_feat: torch.Tensor,
         state=None,
+        cell_idx: torch.Tensor = None,
     ):
         """
         对单个 window 更新一次 SWC state，并把当前 context 回填到点特征。
         """
         state = self._ensure_stream_state(state, fused_feat)
 
-        raw_token_map = self._pool_window_to_spatial_map(points, fused_feat)
+        if cell_idx is None:
+            cell_idx = self._get_spatial_cell_indices(points)
+
+        raw_token_map = self._pool_window_to_spatial_map(
+            points,
+            fused_feat,
+            cell_idx=cell_idx,
+        )
         token_map = self._apply_temporal_cell_diffusion(raw_token_map, state)
         context_map, state = self._run_stream_step(token_map, state, raw_token_map)
 
         channels = fused_feat.size(-1)
-        cell_idx = self._get_spatial_cell_indices(points)
         point_context = context_map.reshape(-1, channels)[cell_idx]
 
         alpha = self.spatial_context_alpha.to(dtype=fused_feat.dtype)

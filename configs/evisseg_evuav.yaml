@@ -41,6 +41,8 @@ GRID_MAMBA:
   large_bucket_bs: 16
   use_local_mamba_checkpoint: True
   local_mamba_checkpoint_levels: [0]
+  local_mamba_checkpoint_policy: adaptive
+  local_mamba_checkpoint_min_window_points: 20000
 
   # SpatialWindowContext
   spatial_context_stride: 8.0
@@ -74,7 +76,12 @@ TRAIN:
   k: 3
   t: 5
   max_events_num : 700000
-  model_save_root: save_model/motion_e7_400_k3_dual_source
+  use_amp: False
+  amp_dtype: bf16
+  deterministic: False
+  cudnn_benchmark: True
+  empty_cache_every_batch: False
+  model_save_root: save_model/motion_e13_control_e7_fp32_no_scale_fusion
 
 TEST:
   vis: False
@@ -83,4 +90,4 @@ TEST:
   pd_detT: 50
   correct_thresh: 0.0001
   save: True
-  model_path: save_model/motion_e7_400_k3_dual_source/best_iou_seed37.pt
+  model_path: save_model/motion_e13_control_e7_fp32_no_scale_fusion/best_iou_seed37.pt

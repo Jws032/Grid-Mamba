@@ -16,6 +16,9 @@ from utils.eval import evalute
 def setup(seed):
     seed_n = seed
     print('random seed:' + str(seed_n))
+    deterministic = bool(getattr(cfg, 'deterministic', True))
+    cudnn_benchmark = bool(getattr(cfg, 'cudnn_benchmark', False))
+
     g = torch.Generator()
     g.manual_seed(seed_n)
     random.seed(seed_n)
@@ -23,25 +26,43 @@ def setup(seed):
     torch.manual_seed(seed_n)
     torch.cuda.manual_seed(seed_n)
     torch.cuda.manual_seed_all(seed_n)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.enabled = False
-    torch.use_deterministic_algorithms(True, warn_only=True)
-    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':16:8'
+    torch.backends.cudnn.deterministic = deterministic
+    torch.backends.cudnn.benchmark = cudnn_benchmark
+    torch.backends.cudnn.enabled = True
+    torch.use_deterministic_algorithms(deterministic, warn_only=True)
+    if deterministic:
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':16:8'
     os.environ['PYTHONHASHSEED'] = str(seed_n)
+
+def get_amp_dtype():
+    amp_dtype = str(getattr(cfg, 'amp_dtype', 'bf16')).lower()
+    if amp_dtype in {'bf16', 'bfloat16'}:
+        return torch.bfloat16
+    if amp_dtype in {'fp16', 'float16'}:
+        return torch.float16
+    raise ValueError("amp_dtype must be 'bf16' or 'fp16'")
 
 if __name__ == '__main__':
     seed = 37
     setup(seed)
-    device = "cuda:0"
+    device = torch.device("cuda:0")
+    use_amp = bool(getattr(cfg, 'use_amp', False)) and device.type == 'cuda'
+    amp_dtype = get_amp_dtype()
+    empty_cache_every_batch = bool(getattr(cfg, 'empty_cache_every_batch', False))
+    num_workers = int(getattr(cfg, 'train_workers', 0))
 
-    net = GridMambaNet(cfg).train().cuda()
+    os.makedirs(cfg.model_save_root, exist_ok=True)
+
+    net = GridMambaNet(cfg).train().to(device)
 
     dataset = EvUAV(cfg, mode='train')
     train_dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=1,
-        collate_fn=dataset.custom_collate
+        collate_fn=dataset.custom_collate,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=num_workers > 0,
     )
 
     optimizer = optim.Adam(
@@ -66,9 +87,14 @@ if __name__ == '__main__':
     val_dataloader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=1,
-        collate_fn=val_dataset.custom_collate
+        collate_fn=val_dataset.custom_collate,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=num_workers > 0,
     )
     evaluter = evalute(cfg)
+    train_loss_fn = nn.BCEWithLogitsLoss(reduction='none')
+    val_loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
 
     # mlflow
     mlflow.set_experiment('train')
@@ -87,10 +113,15 @@ if __name__ == '__main__':
         )
 
         for batch_idx, ev in enumerate(train_dataloader):
-            points = ev['points'].float().cuda()
-            label = ev['seg_label'].float().cuda()
+            points = ev['points'].float().to(device, non_blocking=True)
+            label = ev['seg_label'].float().to(device, non_blocking=True)
 
-            preds, _ = net(points)
+            with torch.autocast(
+                device_type='cuda',
+                dtype=amp_dtype,
+                enabled=use_amp,
+            ):
+                preds, _ = net(points)
 
             # ===== NaN 检查 =====
             if torch.isnan(preds).any() or torch.isinf(preds).any():
@@ -98,8 +129,7 @@ if __name__ == '__main__':
                 continue
 
             # ===== loss =====
-            loss_fn = nn.BCEWithLogitsLoss(reduction='none')
-            element_loss = loss_fn(preds, label)
+            element_loss = train_loss_fn(preds.float(), label)
 
             valid_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
             if valid_mask.sum() == 0:
@@ -110,7 +140,7 @@ if __name__ == '__main__':
             if torch.isnan(loss) or torch.isinf(loss):
                 continue
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
@@ -125,7 +155,7 @@ if __name__ == '__main__':
                     break
 
             if has_nan_grad:
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
                 continue
 
             optimizer.step()
@@ -143,7 +173,8 @@ if __name__ == '__main__':
                     )
                     best_loss = loss.item()
 
-            torch.cuda.empty_cache()
+            if empty_cache_every_batch:
+                torch.cuda.empty_cache()
 
         scheduler.step()
 
@@ -155,27 +186,30 @@ if __name__ == '__main__':
         with torch.no_grad():
             val_loss_total = 0
             val_count = 0
-            loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
-
             evaluter.matches = {}  # 清空
 
             for sample, ev in enumerate(val_dataloader):
-                points = ev['points'].float().cuda()
-                label = ev['seg_label'].float().cuda()
+                points = ev['points'].float().to(device, non_blocking=True)
+                label = ev['seg_label'].float().to(device, non_blocking=True)
 
-                preds, _ = net(points)
+                with torch.autocast(
+                    device_type='cuda',
+                    dtype=amp_dtype,
+                    enabled=use_amp,
+                ):
+                    preds, _ = net(points)
 
                 if preds.shape[0] != label.shape[0]:
                     continue
 
                 # ===== val loss =====
-                loss = loss_fn(preds, label)
+                loss = val_loss_fn(preds.float(), label)
                 val_loss_total += loss.item()
                 val_count += 1
 
                 # ===== eval =====
                 evaluter.matches[str(sample)] = {}
-                evaluter.matches[str(sample)]['seg_pred'] = preds.cpu()
+                evaluter.matches[str(sample)]['seg_pred'] = preds.float().cpu()
                 evaluter.matches[str(sample)]['seg_gt'] = label.cpu()
 
             if val_count > 0:

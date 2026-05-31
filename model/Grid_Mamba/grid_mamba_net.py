@@ -46,6 +46,22 @@ class GridMambaNet(nn.Module):
                 int(level)
                 for level in checkpoint_levels
             }
+        self.local_mamba_checkpoint_policy = str(
+            getattr(cfg, "local_mamba_checkpoint_policy", "levels")
+        ).lower()
+        if self.local_mamba_checkpoint_policy not in {
+            "levels",
+            "adaptive",
+            "always",
+            "never",
+        }:
+            raise ValueError(
+                "local_mamba_checkpoint_policy must be one of: "
+                "'levels', 'adaptive', 'always', or 'never'"
+            )
+        self.local_mamba_checkpoint_min_window_points = int(
+            getattr(cfg, "local_mamba_checkpoint_min_window_points", 20000)
+        )
 
         # 空间窗口上下文开关。关闭后退回原 baseline 的 window 独立输出逻辑。
         self.use_spatial_window_context = bool(
@@ -55,6 +71,14 @@ class GridMambaNet(nn.Module):
         sensor_size = getattr(cfg, "sensor_size", (260, 346))
         self.sensor_height, self.sensor_width = sensor_size
         self.time_max = float(getattr(cfg, "whole_t", 8000.0))
+        self.register_buffer(
+            "_point_limits",
+            torch.tensor(
+                [self.sensor_width, self.sensor_height, self.time_max],
+                dtype=torch.float32,
+            ),
+            persistent=False,
+        )
 
         self.ts_encoder = TSGraphEmbedding(
             input_dim=input_dim,
@@ -77,6 +101,11 @@ class GridMambaNet(nn.Module):
                 [64.0, 64.0, 200.0],
                 [128.0, 128.0, 400.0],
             ],
+        )
+        self.register_buffer(
+            "_scale_strides_tensor",
+            torch.as_tensor(self.scale_strides, dtype=torch.float32),
+            persistent=False,
         )
 
         local_mamba_kwargs = dict(
@@ -190,8 +219,7 @@ class GridMambaNet(nn.Module):
         points: [N, >=3], 前三维为 [x, y, t]
         stride: [3], 对应 [x_stride, y_stride, t_stride]
         """
-        limits = torch.tensor(
-            [self.sensor_width, self.sensor_height, self.time_max],
+        limits = self._point_limits.to(
             dtype=points.dtype,
             device=points.device,
         ).unsqueeze(0)
@@ -226,8 +254,7 @@ class GridMambaNet(nn.Module):
 
         输出范围大致为 [-0.5, 0.5]，分别对应当前 grid 内的 x/y/t 相对位置。
         """
-        limits = torch.tensor(
-            [self.sensor_width, self.sensor_height, self.time_max],
+        limits = self._point_limits.to(
             dtype=points.dtype,
             device=points.device,
         ).unsqueeze(0)
@@ -248,6 +275,31 @@ class GridMambaNet(nn.Module):
         rel_pos = rel_pos.clamp(0.0, 1.0) - 0.5
         return rel_pos
 
+    def _should_checkpoint_local(
+        self,
+        level: int,
+        num_window_points: int,
+        mamba_input: torch.Tensor,
+    ) -> bool:
+        if (
+            not self.use_local_mamba_checkpoint
+            or not torch.is_grad_enabled()
+            or not mamba_input.requires_grad
+        ):
+            return False
+
+        if self.local_mamba_checkpoint_policy == "never":
+            return False
+        if self.local_mamba_checkpoint_policy == "always":
+            return True
+        if self.local_mamba_checkpoint_policy == "adaptive":
+            return num_window_points >= self.local_mamba_checkpoint_min_window_points
+
+        return (
+            self.local_mamba_checkpoint_levels is None
+            or level in self.local_mamba_checkpoint_levels
+        )
+
     def _forward_one_window_features(
         self,
         points: torch.Tensor,
@@ -257,10 +309,10 @@ class GridMambaNet(nn.Module):
         单个 window 内的多尺度局部建模，只返回 fused point feature，不做分类。
         """
         scale_feats = []
+        num_window_points = int(points.size(0))
 
-        for level, stride_value in enumerate(self.scale_strides):
-            stride = torch.tensor(
-                stride_value,
+        for level in range(len(self.scale_strides)):
+            stride = self._scale_strides_tensor[level].to(
                 dtype=points.dtype,
                 device=points.device,
             )
@@ -273,15 +325,7 @@ class GridMambaNet(nn.Module):
             else:
                 mamba_input = feats
 
-            if (
-                self.use_local_mamba_checkpoint
-                and (
-                    self.local_mamba_checkpoint_levels is None
-                    or level in self.local_mamba_checkpoint_levels
-                )
-                and torch.is_grad_enabled()
-                and mamba_input.requires_grad
-            ):
+            if self._should_checkpoint_local(level, num_window_points, mamba_input):
                 local_feat = checkpoint(
                     lambda x, p, module=self.local_mamba_levels[level]: module(x, p)[0],
                     mamba_input,
@@ -369,10 +413,14 @@ class GridMambaNet(nn.Module):
                 win_feats = feats_sorted[start:end]
 
                 fused_feat = self._forward_one_window_features(win_points, win_feats)
+                cell_idx = self.spatial_window_context._get_spatial_cell_indices(
+                    win_points
+                )
                 fused_feat, spatial_context_state = self.spatial_window_context.step(
                     win_points,
                     fused_feat,
                     spatial_context_state,
+                    cell_idx=cell_idx,
                 )
                 outputs.append(self._classify_features(fused_feat))
 
