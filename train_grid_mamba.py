@@ -42,6 +42,7 @@ def get_amp_dtype():
         return torch.float16
     raise ValueError("amp_dtype must be 'bf16' or 'fp16'")
 
+
 if __name__ == '__main__':
     seed = 37
     setup(seed)
@@ -50,6 +51,9 @@ if __name__ == '__main__':
     amp_dtype = get_amp_dtype()
     empty_cache_every_batch = bool(getattr(cfg, 'empty_cache_every_batch', False))
     num_workers = int(getattr(cfg, 'train_workers', 0))
+    train_shuffle = bool(getattr(cfg, 'train_shuffle', True))
+    dataloader_generator = torch.Generator()
+    dataloader_generator.manual_seed(seed)
 
     os.makedirs(cfg.model_save_root, exist_ok=True)
 
@@ -60,9 +64,11 @@ if __name__ == '__main__':
         dataset,
         batch_size=1,
         collate_fn=dataset.custom_collate,
+        shuffle=train_shuffle,
         num_workers=num_workers,
         pin_memory=True,
         persistent_workers=num_workers > 0,
+        generator=dataloader_generator,
     )
 
     optimizer = optim.Adam(
@@ -102,6 +108,8 @@ if __name__ == '__main__':
 
     for epoch in range(cfg.epochs):
         net.train()
+        train_loss_total = 0
+        train_count = 0
 
         pbar = tqdm.tqdm(
             total=len(train_dataloader),
@@ -160,23 +168,31 @@ if __name__ == '__main__':
 
             optimizer.step()
 
-            pbar.set_postfix(loss=loss.item())
+            loss_value = loss.item()
+            train_loss_total += loss_value
+            train_count += 1
+            train_loss = train_loss_total / train_count
+
+            pbar.set_postfix(batch_loss=loss_value, train_loss=train_loss)
             pbar.update(1)
 
             with torch.no_grad():
-                mlflow.log_metric('train_loss', loss.item(), step=epoch)
-
-                if loss.item() < best_loss:
-                    torch.save(
-                        net.state_dict(),
-                        cfg.model_save_root + f'/best_loss_seed{seed}.pt'
-                    )
-                    best_loss = loss.item()
+                global_step = epoch * len(train_dataloader) + batch_idx
+                mlflow.log_metric('train_batch_loss', loss_value, step=global_step)
 
             if empty_cache_every_batch:
                 torch.cuda.empty_cache()
 
         scheduler.step()
+        train_loss = train_loss_total / train_count if train_count > 0 else 0
+        mlflow.log_metric('train_loss', train_loss, step=epoch)
+
+        if train_count > 0 and train_loss < best_loss:
+            torch.save(
+                net.state_dict(),
+                cfg.model_save_root + f'/best_loss_seed{seed}.pt'
+            )
+            best_loss = train_loss
 
         # =========================
         # ===== 验证（每个epoch）=====
@@ -222,7 +238,10 @@ if __name__ == '__main__':
             iou = evaluter.evaluate_semantic_segmantation_miou()
             mlflow.log_metric('val_iou', iou.item(), step=epoch)
 
-            print(f"\nEpoch {epoch} | Val Loss: {val_loss:.6f} | IoU: {iou.item():.6f}")
+            print(
+                f"\nEpoch {epoch} | Train Loss: {train_loss:.6f} | "
+                f"Val Loss: {val_loss:.6f} | IoU: {iou.item():.6f}"
+            )
 
             # ===== 保存 best iou =====
             if iou.item() > best_iou:
