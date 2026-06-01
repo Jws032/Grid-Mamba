@@ -153,6 +153,7 @@ class GridMambaNet(nn.Module):
                 dropout=getattr(cfg, "spatial_context_dropout", 0.1),
                 use_conv=getattr(cfg, "spatial_context_use_conv", True),
                 alpha_init=getattr(cfg, "spatial_context_alpha_init", 0.1),
+                spatial_pool_use_score=getattr(cfg, "spatial_pool_use_score", True),
                 use_stream_mamba_checkpoint=getattr(
                     cfg,
                     "use_stream_mamba_checkpoint",

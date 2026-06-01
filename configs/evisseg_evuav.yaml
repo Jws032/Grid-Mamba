@@ -52,6 +52,7 @@ GRID_MAMBA:
   spatial_context_expand: 1
   spatial_context_dropout: 0.1
   spatial_context_alpha_init: 0.1
+  spatial_pool_use_score: True
   use_stream_mamba_checkpoint: False
   use_temporal_cell_diffusion: True
   temporal_cell_diffusion_kernel_size: 3

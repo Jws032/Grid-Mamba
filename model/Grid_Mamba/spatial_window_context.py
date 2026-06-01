@@ -22,6 +22,7 @@ class SpatialWindowContext(nn.Module):
         dropout: float = 0.1,
         use_conv: bool = True,
         alpha_init: float = 0.1,
+        spatial_pool_use_score: bool = True,
         use_stream_mamba_checkpoint: bool = True,
         use_temporal_cell_diffusion: bool = False,
         temporal_cell_diffusion_alpha_init: float = 0.1,
@@ -38,6 +39,7 @@ class SpatialWindowContext(nn.Module):
         self.sensor_height, self.sensor_width = sensor_size
         self.spatial_context_stride = float(spatial_context_stride)
         self.spatial_context_use_conv = bool(use_conv)
+        self.spatial_pool_use_score = bool(spatial_pool_use_score)
         self.use_stream_mamba_checkpoint = bool(use_stream_mamba_checkpoint)
         self.use_temporal_cell_diffusion = bool(use_temporal_cell_diffusion)
         self.temporal_cell_diffusion_source = str(temporal_cell_diffusion_source)
@@ -482,15 +484,23 @@ class SpatialWindowContext(nn.Module):
             feat_chunk = fused_feat[start:end]
             cell_idx_chunk = cell_idx[start:end]
 
-            if torch.is_grad_enabled() and feat_chunk.requires_grad:
-                weight = checkpoint(
-                    self._score_spatial_pool_weight,
-                    feat_chunk,
-                    use_reentrant=False,
-                )
+            if self.spatial_pool_use_score:
+                if torch.is_grad_enabled() and feat_chunk.requires_grad:
+                    weight = checkpoint(
+                        self._score_spatial_pool_weight,
+                        feat_chunk,
+                        use_reentrant=False,
+                    )
+                else:
+                    weight = self._score_spatial_pool_weight(feat_chunk)
+                weight = weight.to(dtype=fused_feat.dtype)
             else:
-                weight = self._score_spatial_pool_weight(feat_chunk)
-            weight = weight.to(dtype=fused_feat.dtype)
+                weight = torch.ones(
+                    feat_chunk.size(0),
+                    1,
+                    device=device,
+                    dtype=fused_feat.dtype,
+                )
 
             sums.index_add_(0, cell_idx_chunk, feat_chunk * weight)
             weight_sums.index_add_(0, cell_idx_chunk, weight)
