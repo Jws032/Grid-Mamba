@@ -80,17 +80,29 @@ class GridMambaNet(nn.Module):
             persistent=False,
         )
 
-        self.ts_encoder = TSGraphEmbedding(
-            input_dim=input_dim,
-            hidden_dim=embed_dim,
-            output_dim=embed_dim,
-            sensor_size=sensor_size,
-            time_max=self.time_max,
-            tau_t=getattr(cfg, "tau_t", 50),
-            spatial_grid_size=getattr(cfg, "spatial_grid_size", 5),
-            time_bin_size=getattr(cfg, "time_bin_size", 10.0),
-            use_global_density=getattr(cfg, "use_global_density", True),
-        )
+        self.use_ts_embedding = bool(getattr(cfg, "use_ts_embedding", True))
+        if self.use_ts_embedding:
+            self.ts_encoder = TSGraphEmbedding(
+                input_dim=input_dim,
+                hidden_dim=embed_dim,
+                output_dim=embed_dim,
+                sensor_size=sensor_size,
+                time_max=self.time_max,
+                tau_t=getattr(cfg, "tau_t", 50),
+                spatial_grid_size=getattr(cfg, "spatial_grid_size", 5),
+                time_bin_size=getattr(cfg, "time_bin_size", 10.0),
+                use_global_density=getattr(cfg, "use_global_density", True),
+            )
+            self.coord_encoder = None
+        else:
+            self.ts_encoder = None
+            self.coord_encoder = nn.Sequential(
+                nn.Linear(input_dim, embed_dim),
+                nn.ReLU(),
+                nn.Linear(embed_dim, embed_dim),
+                nn.ReLU(),
+                nn.Linear(embed_dim, embed_dim),
+            )
 
         # 多尺度 3D grid: [x_stride, y_stride, t_stride]
         self.scale_strides = getattr(
@@ -348,6 +360,17 @@ class GridMambaNet(nn.Module):
 
         return out
 
+    def _encode_input_features(self, points: torch.Tensor) -> torch.Tensor:
+        if self.use_ts_embedding:
+            return self.ts_encoder.encode_features(points)
+
+        limits = self._point_limits.to(
+            dtype=points.dtype,
+            device=points.device,
+        )
+        normalized_points = (points[:, :3] / limits.unsqueeze(0)).clamp(0.0, 1.0)
+        return self.coord_encoder(normalized_points)
+
     def _forward_one_window(
         self,
         points: torch.Tensor,
@@ -361,7 +384,7 @@ class GridMambaNet(nn.Module):
             return None, prev_state
 
         # 先全局编码，再切 window，避免不同 window 单独编码造成输入分布变化。
-        feats = self.ts_encoder.encode_features(points)
+        feats = self._encode_input_features(points)
 
         if not self.use_window or self.window_size <= 0:
             out = self._forward_one_window(points, feats)

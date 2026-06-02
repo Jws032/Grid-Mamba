@@ -1,6 +1,6 @@
 import torch
 
-def temporal_peak_filter_torch(
+def temporal_peak_filter_components_torch(
         points,
         kernel,
         sensor_size=(260, 346),
@@ -9,6 +9,11 @@ def temporal_peak_filter_torch(
         time_bin_size=10.0,
         use_global_density=True
 ):
+    """Return decomposed TS score components for diagnostics.
+
+    The component formulas intentionally match the existing
+    temporal_peak_filter_torch path so diagnostics reflect the model input.
+    """
     device = points.device
     x, y, t = points[:, 0], points[:, 1], points[:, 2]
     N = t.shape[0]
@@ -79,7 +84,41 @@ def temporal_peak_filter_torch(
         local_mean[idx_b] = val.mean()
 
     # 7. 计算 Score
-    score = (rho / (torch.sqrt(global_density) + 1e-6)) * (rho / (local_mean**0.5 + 1e-6))
+    periodic_score = rho / (torch.sqrt(global_density) + 1e-6)
+    continuity_score = rho / (local_mean**0.5 + 1e-6)
+    combined_score = periodic_score * continuity_score
+
+    return {
+        "rho": rho,
+        "global_density": global_density,
+        "local_mean": local_mean,
+        "periodic_score": periodic_score,
+        "continuity_score": continuity_score,
+        "combined_score": combined_score,
+        "time_bin_count": hist[t_idx].float(),
+        "time_bin_index": t_idx,
+    }
+
+
+def temporal_peak_filter_torch(
+        points,
+        kernel,
+        sensor_size=(260, 346),
+        tau_t=50,
+        spatial_grid_size=5,
+        time_bin_size=10.0,
+        use_global_density=True
+):
+    components = temporal_peak_filter_components_torch(
+        points=points,
+        kernel=kernel,
+        sensor_size=sensor_size,
+        tau_t=tau_t,
+        spatial_grid_size=spatial_grid_size,
+        time_bin_size=time_bin_size,
+        use_global_density=use_global_density,
+    )
+    score = components["combined_score"]
 
     # 8. 特征工程处理 (Log + Z-Score)
     log_scores = torch.log1p(score)

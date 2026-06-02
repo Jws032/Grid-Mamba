@@ -23,6 +23,7 @@ GRID_MAMBA:
   spatial_grid_size: 5
   time_bin_size: 10.0
   use_global_density: True
+  use_ts_embedding: True
 
   # 多尺度 3D grid: [x_stride, y_stride, t_stride]
   scale_strides:
