@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from dataset.ev_uav import EvUAV
+from dataset.ev_flying import EvFlying
 import random
 from model.Grid_Mamba.grid_mamba_net import GridMambaNet
 
@@ -43,6 +44,15 @@ def get_amp_dtype():
     raise ValueError("amp_dtype must be 'bf16' or 'fp16'")
 
 
+def build_dataset(mode):
+    dataset_name = str(getattr(cfg, "dataset_name", "ev_uav")).lower()
+    if dataset_name == "ev_uav":
+        return EvUAV(cfg, mode=mode)
+    if dataset_name == "ev_flying":
+        return EvFlying(cfg, mode=mode)
+    raise ValueError(f"Unsupported dataset_name: {dataset_name}")
+
+
 if __name__ == '__main__':
     seed = 37
     setup(seed)
@@ -59,7 +69,7 @@ if __name__ == '__main__':
 
     net = GridMambaNet(cfg).train().to(device)
 
-    dataset = EvUAV(cfg, mode='train')
+    dataset = build_dataset(mode='train')
     train_dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=1,
@@ -89,7 +99,7 @@ if __name__ == '__main__':
     no_improve_epoch = 0
 
     # ===== val =====
-    val_dataset = EvUAV(cfg, mode='val')
+    val_dataset = build_dataset(mode='val')
     val_dataloader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=1,
