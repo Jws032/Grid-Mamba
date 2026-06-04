@@ -100,7 +100,7 @@ if __name__ == '__main__':
                 preds, _ = net(points)  # preds: [N, 1]
                 
                 # 计算概率和二值预测
-                probs = torch.sigmoid(preds.squeeze()).cpu()  # 概率值 [N]
+                probs = torch.sigmoid(preds.reshape(-1)).cpu()  # 概率值 [N]
                 pred_binary = (probs >= 0.9).long()  # 预测标签(0或1) [N]
                 
                 point_count = preds.shape[0]  # 点数量

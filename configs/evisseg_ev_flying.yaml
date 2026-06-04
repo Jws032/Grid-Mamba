@@ -23,14 +23,14 @@ GRID_MAMBA:
   use_ts_embedding: False
 
   scale_strides:
-    - [32.0, 32.0, 100.0]
-    - [64.0, 64.0, 200.0]
-    - [128.0, 128.0, 400.0]
+    - [96.0, 80.0, 100.0]
+    - [192.0, 160.0, 200.0]
+    - [320.0, 240.0, 400.0]
 
   d_state: 16
   d_conv: 4
   expand: 2
-  dropout: 0.1
+  dropout: 0.15
   max_seq_len: 1024
   small_bucket_bs: 128
   mid_bucket_bs: 64
@@ -40,12 +40,12 @@ GRID_MAMBA:
   local_mamba_checkpoint_policy: adaptive
   local_mamba_checkpoint_min_window_points: 20000
 
-  spatial_context_stride: 8.0
+  spatial_context_stride: 16.0
   spatial_context_use_conv: True
   spatial_context_d_state: 16
   spatial_context_d_conv: 4
   spatial_context_expand: 1
-  spatial_context_dropout: 0.1
+  spatial_context_dropout: 0.15
   spatial_context_alpha_init: 0.1
   spatial_pool_use_score: True
   use_stream_mamba_checkpoint: False
@@ -68,8 +68,9 @@ TRAIN:
   epochs: 50
   batch_size: 1
   train_workers: 8
-  optim: Adam
-  lr: 0.0003
+  optim: AdamW
+  lr: 0.0001
+  weight_decay: 0.0001
   k: 3
   t: 5
   max_events_num: 700000
@@ -80,13 +81,13 @@ TRAIN:
   deterministic: False
   cudnn_benchmark: True
   empty_cache_every_batch: False
-  model_save_root: save_model/ev_flying_denoise_first_seqsplit_hotpixel20
+  model_save_root: save_model/ev_flying
 
 TEST:
   vis: False
   eval: True
-  roc: True
+  roc: False
   pd_detT: 50
   correct_thresh: 0.0001
   save: True
-  model_path: save_model/ev_flying_denoise_first_seqsplit_hotpixel20/best_loss_seed37.pt
+  model_path: save_model/ev_flying/best_iou_seed37.pt

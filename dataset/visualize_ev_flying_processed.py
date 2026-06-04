@@ -38,7 +38,12 @@ def parse_args():
         default="all",
         help="Split to sample from.",
     )
-    parser.add_argument("--num-samples", type=int, default=10, help="Number of samples to draw.")
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=0,
+        help="Number of samples to draw. Default 0 means draw every matching sample.",
+    )
     parser.add_argument("--seed", type=int, default=37, help="Random seed for sample selection.")
     parser.add_argument(
         "--max-points",
@@ -49,7 +54,17 @@ def parse_args():
     parser.add_argument(
         "--include-empty-target",
         action="store_true",
-        help="Allow sampling windows without any foreground target events.",
+        help="Deprecated compatibility flag. Empty-target windows are included by default.",
+    )
+    parser.add_argument(
+        "--target-only",
+        action="store_true",
+        help="Only visualize windows containing foreground target events.",
+    )
+    parser.add_argument(
+        "--clear-output-dir",
+        action="store_true",
+        help="Remove existing png files from --output-dir before writing new visualizations.",
     )
     parser.add_argument(
         "--legend-max-tracks",
@@ -113,7 +128,7 @@ def collect_files(root, split, include_empty_target):
 
 def choose_samples(files, num_samples, seed):
     if num_samples <= 0:
-        return []
+        return list(files)
     rng = random.Random(seed)
     if num_samples >= len(files):
         selected = list(files)
@@ -185,8 +200,8 @@ def plot_sample(split, path, output_path, sample_index, args):
             bg[:, 0],
             bg[:, 1],
             bg[:, 2],
-            c="#8a8a8a",
-            s=0.08,
+            c="red",
+            s=0.75,
             alpha=0.035,
             marker=".",
             linewidths=0,
@@ -281,12 +296,16 @@ def main():
     args = parse_args()
     root = Path(args.root)
     output_dir = Path(args.output_dir)
-    files = collect_files(root, args.split, args.include_empty_target)
+    include_empty_target = args.include_empty_target or not args.target_only
+    files = collect_files(root, args.split, include_empty_target)
 
     if not files:
         raise SystemExit(f"No processed npz files found under {root} for split={args.split}")
 
     samples = choose_samples(files, args.num_samples, args.seed)
+    if output_dir.exists() and args.clear_output_dir:
+        for png_path in output_dir.glob("*.png"):
+            png_path.unlink()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"EV-Flying processed visualization")
@@ -295,7 +314,8 @@ def main():
     print(f"  available files: {len(files)}")
     print(f"  selected samples: {len(samples)}")
     print(f"  max_points: {args.max_points if args.max_points else 'all'}")
-    print(f"  include_empty_target: {args.include_empty_target}")
+    print(f"  target_only: {args.target_only}")
+    print(f"  include_empty_target: {include_empty_target}")
 
     for index, (split, path) in enumerate(samples):
         output_name = f"sample_{index:03d}_{split}_{path.stem}.png"
