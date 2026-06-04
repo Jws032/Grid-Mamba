@@ -2,7 +2,15 @@ save_model/
 mlruns/
 .vscode/
 dataset/EV-UAV-dataset
+dataset/Ev-Flying/
+dataset/Ev-Flying-processed/
+
+analysis/
+analysis_outputs/
+
+visualization/
 .idea/
+__pycache__/
 configs/__pycache__/
 dataset/__pycache__/
 model/__pycache__/

@@ -1,10 +1,11 @@
 import os
+import shutil
 from configs.configs import cfg
 import torch
 import torch.nn as nn
 import numpy as np
 from dataset.ev_uav import EvUAV
-from dataset.ev_flying import EvFlying
+
 import random
 from model.Grid_Mamba.grid_mamba_net import GridMambaNet
 
@@ -44,12 +45,23 @@ def get_amp_dtype():
     raise ValueError("amp_dtype must be 'bf16' or 'fp16'")
 
 
+def save_train_config_snapshot():
+    config_path = getattr(cfg, "config", None)
+    if config_path is None:
+        return
+
+    if not os.path.exists(config_path):
+        print(f"Warning: config file not found, skip snapshot: {config_path}")
+        return
+
+    target_path = os.path.join(cfg.model_save_root, "train_config.yaml")
+    shutil.copy2(config_path, target_path)
+
+
 def build_dataset(mode):
     dataset_name = str(getattr(cfg, "dataset_name", "ev_uav")).lower()
     if dataset_name == "ev_uav":
         return EvUAV(cfg, mode=mode)
-    if dataset_name == "ev_flying":
-        return EvFlying(cfg, mode=mode)
     raise ValueError(f"Unsupported dataset_name: {dataset_name}")
 
 
@@ -66,6 +78,7 @@ if __name__ == '__main__':
     dataloader_generator.manual_seed(seed)
 
     os.makedirs(cfg.model_save_root, exist_ok=True)
+    save_train_config_snapshot()
 
     net = GridMambaNet(cfg).train().to(device)
 

@@ -81,10 +81,10 @@ TRAIN:
   train_shuffle: True
   use_amp: False
   amp_dtype: bf16
-  deterministic: False
-  cudnn_benchmark: True
+  deterministic: True
+  cudnn_benchmark: False
   empty_cache_every_batch: False
-  model_save_root: save_model/evisseg_evuav_shuffle_avg_loss
+  model_save_root: save_model/evuav
 
 TEST:
   vis: False
@@ -93,4 +93,4 @@ TEST:
   pd_detT: 50
   correct_thresh: 0.0001
   save: True
-  model_path: save_model/evisseg_evuav_shuffle_avg_loss/best_loss_seed37.pt
+  model_path: save_model/evuav/best_loss_seed37.pt
