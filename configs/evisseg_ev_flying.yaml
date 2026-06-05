@@ -81,7 +81,7 @@ TRAIN:
   deterministic: False
   cudnn_benchmark: True
   empty_cache_every_batch: False
-  model_save_root: save_model/ev_flying
+  model_save_root: save_model/grid_mamba/ev_flying
 
 TEST:
   vis: False
@@ -90,4 +90,4 @@ TEST:
   pd_detT: 50
   correct_thresh: 0.0001
   save: True
-  model_path: save_model/ev_flying/best_iou_seed37.pt
+  model_path: save_model/grid_mamba/ev_flying/best_iou_seed37.pt
