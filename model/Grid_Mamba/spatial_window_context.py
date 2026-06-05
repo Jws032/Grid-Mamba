@@ -8,7 +8,24 @@ from mamba_ssm import Mamba
 
 class SpatialWindowContext(nn.Module):
     """
-    Spatial Window Context：支持离线 SWC 和逐 window 流式 SWC。
+    空间窗口上下文模块 (Spatial Window Context, SWC)
+
+    设计目标：
+    - 在点云检测/分割任务中，将点云按窗口 (window) 划分，跨窗口建模空间上下文。
+    - 每个窗口的点通过可学习评分聚合为一个低分辨率 spatial token map (H_s, W_s)。
+    - 对所有窗口的 token map 按空间位置形成时序序列，用 Mamba (状态空间模型) 捕获跨窗口的长程依赖。
+    - 支持两种使用模式：
+        * forward(): 离线批量处理，一次性传入所有窗口，利用完整 Mamba 前向。
+        * forward_streaming() / step(): 逐窗口流式处理，维护 Mamba 隐状态，
+          适用于在线推理或训练时的 memory-efficient 逐步计算。
+
+    主要组件：
+    1. 空间池化：加权聚合窗口内点到空间网格 (cell)。
+    2. Mamba 时序建模：对每个 cell 的 token 序列沿窗口维度应用 Mamba。
+    3. 可选的 3x3 深度可分离卷积：对 context map 在空间上平滑。
+    4. 可选的时序扩散 (Temporal Cell Diffusion)：利用上一窗口的 context/token 平滑当前 token map，
+       减少窗口间抖动，支持三种来源 (prev_context, prev_token, dual)。
+    5. 残差注入：通过可学习参数 alpha 将 context 加回原始点特征。
     """
 
     def __init__(
@@ -57,9 +74,11 @@ class SpatialWindowContext(nn.Module):
         if temporal_cell_diffusion_kernel_size % 2 == 0:
             raise ValueError("temporal_cell_diffusion_kernel_size must be odd")
 
+        # 计算空间 token map 的尺寸
         self.spatial_token_h = int(math.ceil(self.sensor_height / self.spatial_context_stride))
         self.spatial_token_w = int(math.ceil(self.sensor_width / self.spatial_context_stride))
 
+        # ---- Mamba 用于时序建模 ----
         self.spatial_context_norm = nn.LayerNorm(fused_dim)
         self.spatial_context_mamba = Mamba(
             d_model=fused_dim,
@@ -69,15 +88,16 @@ class SpatialWindowContext(nn.Module):
         )
         self.spatial_context_dropout = nn.Dropout(dropout)
 
+        # ---- 空间池化的可学习评分函数 ----
         self.spatial_pool_score = nn.Sequential(
             nn.LayerNorm(fused_dim),
             nn.Linear(fused_dim, 1),
         )
         nn.init.zeros_(self.spatial_pool_score[-1].weight)
         nn.init.zeros_(self.spatial_pool_score[-1].bias)
-        self.spatial_pool_chunk_size = 65536
+        self.spatial_pool_chunk_size = 65536  # 分块累加避免显存峰值
 
-        # 深度可分离 3x3 conv：比普通 C->C 3x3 conv 更轻。
+        # ---- 对 context map 的空间卷积 (深度可分离 3x3) ----
         self.spatial_context_conv = nn.Sequential(
             nn.Conv2d(
                 fused_dim,
@@ -91,9 +111,10 @@ class SpatialWindowContext(nn.Module):
             nn.Conv2d(fused_dim, fused_dim, kernel_size=1, bias=True),
         )
 
-        # alpha 控制空间上下文注入强度。初始较小，避免一开始破坏 baseline。
+        # 上下文注入强度，初始较小以便训练初期主要依赖原始特征
         self.spatial_context_alpha = nn.Parameter(torch.tensor(alpha_init, dtype=torch.float32))
 
+        # ---- 时序扩散相关层 ----
         def make_diffusion_conv():
             diffusion_padding = temporal_cell_diffusion_kernel_size // 2
             return nn.Sequential(
@@ -120,6 +141,7 @@ class SpatialWindowContext(nn.Module):
             nn.init.constant_(gate.bias, gate_bias)
             return gate
 
+        # 实际初始化根据配置选择单分支或双分支
         self.temporal_cell_diffusion_conv = None
         self.temporal_cell_diffusion_gate = None
         self.temporal_cell_diffusion_alpha = None
@@ -164,9 +186,11 @@ class SpatialWindowContext(nn.Module):
             )
 
     def _score_spatial_pool_weight(self, fused_feat: torch.Tensor) -> torch.Tensor:
+        """计算每个点的空间池化权重 (sigmoid)"""
         return torch.sigmoid(self.spatial_pool_score(fused_feat))
 
     def _init_stream_state(self, reference: torch.Tensor) -> dict:
+        """初始化流式 Mamba 的隐状态 (conv_state, ssm_state) 和上一窗口的缓存 map。"""
         num_cells = self.spatial_token_h * self.spatial_token_w
         mamba = self.spatial_context_mamba
         conv_dtype = reference.dtype
@@ -193,6 +217,7 @@ class SpatialWindowContext(nn.Module):
         }
 
     def _ensure_stream_state(self, state, reference: torch.Tensor) -> dict:
+        """检查传入的流式状态是否有效，无效则重新初始化。"""
         num_cells = self.spatial_token_h * self.spatial_token_w
         mamba = self.spatial_context_mamba
         expected_conv_shape = (num_cells, mamba.d_inner, mamba.d_conv)
@@ -215,6 +240,7 @@ class SpatialWindowContext(nn.Module):
 
         return state
 
+    # ---------- Mamba 单步操作 (用于流式处理) ----------
     def _mamba_step_train(
         self,
         hidden_states: torch.Tensor,
@@ -222,10 +248,8 @@ class SpatialWindowContext(nn.Module):
         ssm_state: torch.Tensor,
     ):
         """
-        Differentiable single-token Mamba step.
-
-        This mirrors mamba_ssm.Mamba.step, but avoids in-place state updates so
-        full BPTT across windows remains valid during training.
+        可微的单 token Mamba 前向步骤。
+        避免原位更新状态，保证完整 BPTT 有效。
         """
         mamba = self.spatial_context_mamba
         dtype = hidden_states.dtype
@@ -233,6 +257,7 @@ class SpatialWindowContext(nn.Module):
         xz = mamba.in_proj(hidden_states.squeeze(1))
         x, z = xz.chunk(2, dim=-1)
 
+        # 更新卷积状态
         conv_state = torch.cat([conv_state[:, :, 1:], x.unsqueeze(-1)], dim=-1)
         conv_weight = mamba.conv1d.weight.squeeze(1)
         x = torch.sum(conv_state * conv_weight.unsqueeze(0), dim=-1)
@@ -240,6 +265,7 @@ class SpatialWindowContext(nn.Module):
             x = x + mamba.conv1d.bias
         x = mamba.act(x).to(dtype=dtype)
 
+        # SSM 相关计算
         x_db = mamba.x_proj(x)
         dt, b_state, c_state = torch.split(
             x_db,
@@ -267,6 +293,11 @@ class SpatialWindowContext(nn.Module):
         conv_state: torch.Tensor,
         ssm_state: torch.Tensor,
     ):
+        """
+        流式单步 Mamba 调度：
+        - 训练且需要梯度时，走可微版本，可选 checkpoint 节省显存。
+        - 纯推理时优先使用 CUDA 优化的 step 函数。
+        """
         use_train_step = torch.is_grad_enabled() and hidden_states.requires_grad
 
         if use_train_step and self.use_stream_mamba_checkpoint:
@@ -284,11 +315,7 @@ class SpatialWindowContext(nn.Module):
         if not hidden_states.is_cuda:
             return self._mamba_step_train(hidden_states, conv_state, ssm_state)
 
-        # The CUDA inference kernels used by Mamba.step require the convolution
-        # cache and projected input to have exactly the same dtype. Under BF16
-        # autocast, the surrounding network may produce mixed FP32/BF16 tensors,
-        # so run this inference-only step in FP32 and keep the stream state stable
-        # across windows instead of reinitializing it on dtype differences.
+        # 推理时为了数值稳定性，强制转换为 float 计算
         with torch.autocast(device_type="cuda", enabled=False):
             return self.spatial_context_mamba.step(
                 hidden_states.float(),
@@ -296,11 +323,16 @@ class SpatialWindowContext(nn.Module):
                 ssm_state.float(),
             )
 
+    # ---------- 时序cell扩散 (跨窗口平滑) ----------
     def _apply_temporal_cell_diffusion(
         self,
         token_map: torch.Tensor,
         state: dict,
     ) -> torch.Tensor:
+        """
+        利用上一窗口的 context/token 图对当前 token map 做轻量扩散，减少窗口间特征跳变。
+        根据 source 类型选择对应的上一帧缓存和分支。
+        """
         if not self.use_temporal_cell_diffusion:
             return token_map
 
@@ -343,6 +375,7 @@ class SpatialWindowContext(nn.Module):
         diffusion_gate: nn.Module,
         diffusion_alpha: torch.Tensor,
     ) -> torch.Tensor:
+        """单分支时序扩散：门控融合当前 token 和上一帧扩散后的特征。"""
         diffused_prev = diffusion_conv(prev_nchw)
         gate = torch.sigmoid(
             diffusion_gate(torch.cat([token_nchw, diffused_prev], dim=1))
@@ -356,6 +389,7 @@ class SpatialWindowContext(nn.Module):
         token_map: torch.Tensor,
         state: dict,
     ) -> torch.Tensor:
+        """双源扩散：同时参考上一帧的 context map 和 raw token map，各一个分支。"""
         ctx_map = state.get("prev_context_map")
         raw_token_map = state.get("prev_raw_token_map")
         if raw_token_map is None:
@@ -387,12 +421,20 @@ class SpatialWindowContext(nn.Module):
 
         return token_nchw + residual
 
+    # ---------- 流式单步处理核心 ----------
     def _run_stream_step(
         self,
         token_map: torch.Tensor,
         state: dict,
         raw_token_map: torch.Tensor = None,
     ):
+        """
+        对流式状态执行一个窗口的空间上下文更新：
+        1. token map 展平为序列，经 LayerNorm
+        2. 送入 Mamba 单步，更新内部状态
+        3. 可选的空间卷积平滑
+        4. 更新并返回 state (包含新 context map 和 token map 缓存)
+        """
         height, width, channels = token_map.shape
 
         temporal_token = token_map.reshape(height * width, channels)
@@ -412,23 +454,21 @@ class SpatialWindowContext(nn.Module):
             context_nchw = self.spatial_context_conv(context_nchw)
             context_map = context_nchw.squeeze(0).permute(1, 2, 0).contiguous()
 
-        # prev_token_map keeps the effective token for old single-source ablations;
-        # prev_raw_token_map drives the dual-source token branch.
         new_state = {
             "conv_state": conv_state,
             "ssm_state": ssm_state,
             "prev_context_map": context_map,
-            "prev_token_map": token_map,
+            "prev_token_map": token_map,               # 用于单源扩散的“有效token”
             "prev_raw_token_map": raw_token_map if raw_token_map is not None else token_map,
         }
 
         return context_map, new_state
 
+    # ---------- 空间网格划分辅助函数 ----------
     def _get_spatial_cell_indices(self, points: torch.Tensor) -> torch.Tensor:
         """
-        将点映射到低分辨率 2D spatial context cell。
-
-        返回 linear index: y_cell * W + x_cell, shape [N]
+        将点坐标映射到低分辨率空间 cell 的线性索引。
+        输入 points: [N, 3] (x, y, ...) 输出: [N] 索引值 [0, H*W-1]
         """
         x = points[:, 0].clamp(0.0, float(self.sensor_width) - 1e-6)
         y = points[:, 1].clamp(0.0, float(self.sensor_height) - 1e-6)
@@ -453,11 +493,8 @@ class SpatialWindowContext(nn.Module):
         cell_idx: torch.Tensor = None,
     ) -> torch.Tensor:
         """
-        将一个 window 的逐点 fused feature 加权池化为低分辨率 spatial token map。
-
-        points:     [N_i, 3]
-        fused_feat: [N_i, C]
-        return:     [H_s, W_s, C]
+        将一个窗口内的点特征聚合为 [H_s, W_s, C] 的空间 token map。
+        使用可学习评分进行加权平均，分块累加避免显存峰值。
         """
         num_cells = self.spatial_token_h * self.spatial_token_w
         channels = fused_feat.size(-1)
@@ -508,6 +545,7 @@ class SpatialWindowContext(nn.Module):
         tokens = sums / weight_sums.clamp(min=1e-6)
         return tokens.view(self.spatial_token_h, self.spatial_token_w, channels)
 
+    # ---------- 对外接口 ----------
     def step(
         self,
         points: torch.Tensor,
@@ -516,21 +554,32 @@ class SpatialWindowContext(nn.Module):
         cell_idx: torch.Tensor = None,
     ):
         """
-        对单个 window 更新一次 SWC state，并把当前 context 回填到点特征。
+        流式模式单窗口处理：
+        1. 聚合当前窗口 point feature -> token map
+        2. 可选的时序扩散
+        3. Mamba 单步更新 state，得到 context map
+        4. 按 cell 索引将 context 残差加回原始点特征
+        返回 (增强特征, 新状态)
         """
         state = self._ensure_stream_state(state, fused_feat)
 
         if cell_idx is None:
             cell_idx = self._get_spatial_cell_indices(points)
 
+        # 1. 聚合点特征为空间 token map 
         raw_token_map = self._pool_window_to_spatial_map(
             points,
             fused_feat,
             cell_idx=cell_idx,
         )
+        
+        # 2. 利用上一窗口的 context/token 图对当前 token map 做轻量扩散
         token_map = self._apply_temporal_cell_diffusion(raw_token_map, state)
+        
+        # 3. Mamba 单步更新 state，得到 context map
         context_map, state = self._run_stream_step(token_map, state, raw_token_map)
 
+        # 4. 按 cell 索引将 context 残差加回原始点特征
         channels = fused_feat.size(-1)
         point_context = context_map.reshape(-1, channels)[cell_idx]
 
@@ -546,7 +595,7 @@ class SpatialWindowContext(nn.Module):
         state=None,
     ):
         """
-        逐 window 运行 SWC。训练时保留完整计算图，推理时可复用返回的 state。
+        对所有窗口顺序执行流式 step，返回增强后的特征列表和最终状态。
         """
         enhanced_feats = []
 
@@ -562,12 +611,12 @@ class SpatialWindowContext(nn.Module):
         window_feats: list,
     ) -> list:
         """
-        对所有 window 的 fused point feature 注入空间保持的跨窗口上下文。
-
-        1. 每个 window 聚合为 [H_s, W_s, C] spatial token map；
-        2. 每个空间 cell 的 token 序列沿 window 维度送入 Mamba；
-        3. 对每个 window 的 context map 做 3x3 spatial conv；
-        4. 每个点按照自己的 spatial cell 取回 context，并残差加回 fused feature。
+        离线批量处理全部窗口。
+        流程：
+        1. 每个窗口独立池化出空间 token map -> stack 为 [T, H_s, W_s, C]
+        2. 重排为 [H_s*W_s, T, C] 送入 Mamba (沿时间轴建模每个 cell)
+        3. 可选的 3x3 空间卷积平滑 context
+        4. 按 cell 索引把 context 残差加回各个窗口的点特征
         """
         if len(window_feats) <= 1:
             return window_feats

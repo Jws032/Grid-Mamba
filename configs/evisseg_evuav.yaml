@@ -84,7 +84,7 @@ TRAIN:
   deterministic: True
   cudnn_benchmark: False
   empty_cache_every_batch: False
-  model_save_root: save_model/evuav
+  model_save_root: save_model/grid_mamba/evuav
 
 TEST:
   vis: False
@@ -93,4 +93,4 @@ TEST:
   pd_detT: 50
   correct_thresh: 0.0001
   save: True
-  model_path: save_model/evuav/best_loss_seed37.pt
+  model_path: save_model/grid_mamba/evuav/best_loss_seed37.pt

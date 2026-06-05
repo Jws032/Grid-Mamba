@@ -380,16 +380,31 @@ class GridMambaNet(nn.Module):
         return self._classify_features(fused_feat)
 
     def forward(self, points: torch.Tensor, prev_state=None):
+        """
+        前向传播入口。
+
+        Args:
+            points: [N, >=3] 点云，前三列为 (x, y, t)。
+            prev_state: 可选，流式模式下上一个时间步的 SpatialWindowContext 状态，
+                       用于跨批次保持 Mamba 隐状态。
+
+        Returns:
+            out: [N, ...] 分类输出，顺序与输入一致。
+            prev_state: 更新后的流式状态（仅当 use_spatial_window_context 不为 None 时）。
+        """
+        # 空点云直接返回
         if points.numel() == 0:
             return None, prev_state
 
-        # 先全局编码，再切 window，避免不同 window 单独编码造成输入分布变化。
+        # 1. 全局编码：先在全体点上提取特征，再切窗口，避免不同窗口编码分布不一致
         feats = self._encode_input_features(points)
 
+        # 2. 不使用窗口划分时，整体作为单个窗口处理
         if not self.use_window or self.window_size <= 0:
             out = self._forward_one_window(points, feats)
             return out, prev_state
 
+        # 3. 按时序排序，划分窗口
         sort_idx = torch.argsort(points[:, 2])
         points_sorted = points[sort_idx]
         feats_sorted = feats[sort_idx]
@@ -401,6 +416,7 @@ class GridMambaNet(nn.Module):
             rounding_mode="floor",
         ).long()
 
+        # 获取连续相同 window_id 的计数，得到每个窗口的起止位置
         _, counts = torch.unique_consecutive(
             window_ids,
             return_counts=True,
@@ -413,7 +429,9 @@ class GridMambaNet(nn.Module):
         )
         torch.cumsum(counts, dim=0, out=cum_counts[1:])
 
+        # 4. 逐窗口处理
         if not self.use_spatial_window_context:
+            # ----- 基线模式：各窗口独立前向，无跨窗口上下文 -----
             outputs = []
             for i in range(counts.numel()):
                 start = cum_counts[i]
@@ -426,8 +444,9 @@ class GridMambaNet(nn.Module):
 
             out_sorted = torch.cat(outputs, dim=0)
         else:
+            # ----- 空间窗口上下文模式：逐窗口融合跨窗口上下文 -----
             outputs = []
-            spatial_context_state = prev_state
+            spatial_context_state = prev_state   # 继承上一批次的流式状态
 
             for i in range(counts.numel()):
                 start = cum_counts[i]
@@ -436,21 +455,30 @@ class GridMambaNet(nn.Module):
                 win_points = points_sorted[start:end]
                 win_feats = feats_sorted[start:end]
 
+                # 4a. 窗口内多尺度特征提取：Multi-scale Local Mamba
                 fused_feat = self._forward_one_window_features(win_points, win_feats)
+
+                # 4b. 获取点在低分辨率空间 cell 中的索引
                 cell_idx = self.spatial_window_context._get_spatial_cell_indices(
                     win_points
                 )
+
+                # 4c. 流式空间上下文更新：输入当前窗口特征，更新 Mamba 状态，
+                #     并将空间上下文残差加回 fused_feat
                 fused_feat, spatial_context_state = self.spatial_window_context.step(
                     win_points,
                     fused_feat,
                     spatial_context_state,
                     cell_idx=cell_idx,
                 )
+
+                # 4d. 分类
                 outputs.append(self._classify_features(fused_feat))
 
             out_sorted = torch.cat(outputs, dim=0)
-            prev_state = spatial_context_state
+            prev_state = spatial_context_state   # 更新流式状态，供下一批次使用
 
+        # 5. 将输出恢复为输入点的原始顺序
         reverse_idx = torch.empty_like(sort_idx)
         reverse_idx[sort_idx] = torch.arange(points.size(0), device=points.device)
 
