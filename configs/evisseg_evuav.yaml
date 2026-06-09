@@ -57,7 +57,7 @@ GRID_MAMBA:
   use_stream_mamba_checkpoint: False
   use_temporal_cell_diffusion: True
   temporal_cell_diffusion_kernel_size: 3
-  temporal_cell_diffusion_source: dual
+  temporal_cell_diffusion_source: prev_context
   temporal_context_diffusion_alpha_init: 0.1
   temporal_context_diffusion_gate_bias: -2.0
   temporal_token_diffusion_alpha_init: 0.05
@@ -81,8 +81,8 @@ TRAIN:
   train_shuffle: True
   use_amp: False
   amp_dtype: bf16
-  deterministic: True
-  cudnn_benchmark: False
+  deterministic: False
+  cudnn_benchmark: True
   empty_cache_every_batch: False
   model_save_root: save_model/grid_mamba/evuav
 

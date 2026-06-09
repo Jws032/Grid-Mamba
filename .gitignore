@@ -21,4 +21,5 @@ whl/
 
 point_level_eval.csv
 predictions.txt
-tools/
+tools/*
+!tools/run_ablation.py
