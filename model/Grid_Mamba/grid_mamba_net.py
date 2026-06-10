@@ -81,6 +81,9 @@ class GridMambaNet(nn.Module):
         )
 
         self.use_ts_embedding = bool(getattr(cfg, "use_ts_embedding", True))
+        self.use_streaming_ts_embedding = bool(
+            getattr(cfg, "use_streaming_ts_embedding", False)
+        )
         if self.use_ts_embedding:
             self.ts_encoder = TSGraphEmbedding(
                 input_dim=input_dim,
@@ -92,9 +95,12 @@ class GridMambaNet(nn.Module):
                 spatial_grid_size=getattr(cfg, "spatial_grid_size", 5),
                 time_bin_size=getattr(cfg, "time_bin_size", 10.0),
                 use_global_density=getattr(cfg, "use_global_density", True),
+                stream_norm_min_count=getattr(cfg, "ts_stream_norm_min_count", 128),
+                stream_norm_eps=getattr(cfg, "ts_stream_norm_eps", 1e-6),
             )
             self.coord_encoder = None
         else:
+            self.use_streaming_ts_embedding = False
             self.ts_encoder = None
             self.coord_encoder = nn.Sequential(
                 nn.Linear(input_dim, embed_dim),
@@ -371,6 +377,12 @@ class GridMambaNet(nn.Module):
         normalized_points = (points[:, :3] / limits.unsqueeze(0)).clamp(0.0, 1.0)
         return self.coord_encoder(normalized_points)
 
+    def _encode_streaming_input_features(self, points: torch.Tensor, ts_state):
+        if self.use_ts_embedding and self.use_streaming_ts_embedding:
+            return self.ts_encoder.forward_streaming(points, ts_state)
+
+        return self._encode_input_features(points), ts_state
+
     def _forward_one_window(
         self,
         points: torch.Tensor,
@@ -396,18 +408,27 @@ class GridMambaNet(nn.Module):
         if points.numel() == 0:
             return None, prev_state
 
-        # 1. 全局编码：先在全体点上提取特征，再切窗口，避免不同窗口编码分布不一致
-        feats = self._encode_input_features(points)
+        use_streaming_ts = self.use_ts_embedding and self.use_streaming_ts_embedding
 
-        # 2. 不使用窗口划分时，整体作为单个窗口处理
+        # 1. 不使用窗口划分时，整体作为单个窗口处理
         if not self.use_window or self.window_size <= 0:
+            if use_streaming_ts:
+                feats, _ = self.ts_encoder.forward_streaming(points, None)
+            else:
+                feats = self._encode_input_features(points)
             out = self._forward_one_window(points, feats)
             return out, prev_state
 
-        # 3. 按时序排序，划分窗口
+        # 2. 按时序排序，划分窗口
         sort_idx = torch.argsort(points[:, 2])
         points_sorted = points[sort_idx]
-        feats_sorted = feats[sort_idx]
+
+        if use_streaming_ts:
+            feats_sorted = None
+        else:
+            # Offline/debug 路径：保持旧行为，先全 sample 编码再切 window。
+            feats = self._encode_input_features(points)
+            feats_sorted = feats[sort_idx]
 
         t = points_sorted[:, 2]
         window_ids = torch.div(
@@ -429,16 +450,23 @@ class GridMambaNet(nn.Module):
         )
         torch.cumsum(counts, dim=0, out=cum_counts[1:])
 
-        # 4. 逐窗口处理
+        # 3. 逐窗口处理
         if not self.use_spatial_window_context:
             # ----- 基线模式：各窗口独立前向，无跨窗口上下文 -----
             outputs = []
+            ts_state = None
             for i in range(counts.numel()):
                 start = cum_counts[i]
                 end = cum_counts[i + 1]
 
                 win_points = points_sorted[start:end]
-                win_feats = feats_sorted[start:end]
+                if use_streaming_ts:
+                    win_feats, ts_state = self._encode_streaming_input_features(
+                        win_points,
+                        ts_state,
+                    )
+                else:
+                    win_feats = feats_sorted[start:end]
 
                 outputs.append(self._forward_one_window(win_points, win_feats))
 
@@ -447,13 +475,20 @@ class GridMambaNet(nn.Module):
             # ----- 空间窗口上下文模式：逐窗口融合跨窗口上下文 -----
             outputs = []
             spatial_context_state = prev_state   # 继承上一批次的流式状态
+            ts_state = None
 
             for i in range(counts.numel()):
                 start = cum_counts[i]
                 end = cum_counts[i + 1]
 
                 win_points = points_sorted[start:end]
-                win_feats = feats_sorted[start:end]
+                if use_streaming_ts:
+                    win_feats, ts_state = self._encode_streaming_input_features(
+                        win_points,
+                        ts_state,
+                    )
+                else:
+                    win_feats = feats_sorted[start:end]
 
                 # 4a. 窗口内多尺度特征提取：Multi-scale Local Mamba
                 fused_feat = self._forward_one_window_features(win_points, win_feats)

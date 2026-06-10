@@ -24,6 +24,9 @@ GRID_MAMBA:
   time_bin_size: 10.0
   use_global_density: True
   use_ts_embedding: True
+  use_streaming_ts_embedding: True
+  ts_stream_norm_min_count: 256
+  ts_stream_norm_eps: 0.000001
 
   # 多尺度 3D grid: [x_stride, y_stride, t_stride]
   scale_strides:
@@ -84,7 +87,7 @@ TRAIN:
   deterministic: False
   cudnn_benchmark: True
   empty_cache_every_batch: False
-  model_save_root: save_model/grid_mamba/evuav
+  model_save_root: save_model/grid_mamba/evuav_streaming_ts
 
 TEST:
   vis: False
@@ -93,4 +96,4 @@ TEST:
   pd_detT: 50
   correct_thresh: 0.0001
   save: True
-  model_path: save_model/grid_mamba/evuav/best_loss_seed37.pt
+  model_path: save_model/grid_mamba/evuav_streaming_ts/best_loss_seed37.pt
