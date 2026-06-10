@@ -79,14 +79,19 @@ def temporal_peak_filter_components_torch(
         local_ts = torch.nn.functional.conv2d(ts_4d, kernel, padding=1)[0, 0]
 
         # 提取当前点的响应
-        val = local_ts[xb, yb]
+        # TS score is a density-like response; learned kernels can otherwise
+        # make it negative and break the sqrt/log path below.
+        val = local_ts[xb, yb].clamp_min(0.0)
         rho[idx_b] = val
         local_mean[idx_b] = val.mean()
 
     # 7. 计算 Score
-    periodic_score = rho / (torch.sqrt(global_density) + 1e-6)
-    continuity_score = rho / (local_mean**0.5 + 1e-6)
-    combined_score = periodic_score * continuity_score
+    rho_safe = rho.clamp_min(0.0)
+    global_density_safe = global_density.clamp_min(1e-6)
+    local_mean_safe = local_mean.clamp_min(1e-6)
+    periodic_score = rho_safe / (torch.sqrt(global_density_safe) + 1e-6)
+    continuity_score = rho_safe / (torch.sqrt(local_mean_safe) + 1e-6)
+    combined_score = (periodic_score * continuity_score).clamp_min(0.0)
 
     return {
         "rho": rho,
@@ -121,9 +126,10 @@ def temporal_peak_filter_torch(
     score = components["combined_score"]
 
     # 8. 特征工程处理 (Log + Z-Score)
-    log_scores = torch.log1p(score)
+    log_scores = torch.log1p(score.clamp_min(0.0))
     score_mean = log_scores.mean()
-    score_std = log_scores.std()
+    score_std = log_scores.std(unbiased=False)
     processed_score = (log_scores - score_mean) / (score_std + 1e-6)
+    processed_score = torch.nan_to_num(processed_score, nan=0.0, posinf=0.0, neginf=0.0)
 
     return processed_score

@@ -143,7 +143,7 @@ if __name__ == '__main__':
 
             # ===== NaN 检查 =====
             if torch.isnan(preds).any() or torch.isinf(preds).any():
-                print("Warning: model output contains NaN/Inf!")
+                print(f"Warning: train output contains NaN/Inf at epoch={epoch}, batch={batch_idx}!")
                 continue
 
             # ===== loss =====
@@ -227,9 +227,15 @@ if __name__ == '__main__':
 
                 if preds.shape[0] != label.shape[0]:
                     continue
+                if torch.isnan(preds).any() or torch.isinf(preds).any():
+                    print(f"Warning: val output contains NaN/Inf at epoch={epoch}, sample={sample}!")
+                    continue
 
                 # ===== val loss =====
                 loss = val_loss_fn(preds.float(), label)
+                if torch.isnan(loss) or torch.isinf(loss):
+                    print(f"Warning: val loss is NaN/Inf at epoch={epoch}, sample={sample}!")
+                    continue
                 val_loss_total += loss.item()
                 val_count += 1
 

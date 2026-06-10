@@ -43,6 +43,10 @@ class TSGraphEmbedding(nn.Module):
             nn.Linear(hidden_dim, output_dim),
         )
 
+    def _get_positive_kernel(self):
+        kernel = self.learnable_kernel.float().abs()
+        return kernel / kernel.sum().clamp_min(1e-6)
+
     def _normalize_coordinates(self, points):
         # 保持原有逻辑
         norm_scale = torch.tensor([self.sensor_width, self.sensor_height, self.time_max], device=points.device)
@@ -59,7 +63,7 @@ class TSGraphEmbedding(nn.Module):
         with torch.autocast(device_type=autocast_device, enabled=False):
             event_scores = temporal_peak_filter_torch(
                 points=points.float(),
-                kernel=self.learnable_kernel.float(),
+                kernel=self._get_positive_kernel(),
                 sensor_size=self.sensor_size,
                 tau_t=self.tau_t,
                 spatial_grid_size=self.spatial_grid_size,
