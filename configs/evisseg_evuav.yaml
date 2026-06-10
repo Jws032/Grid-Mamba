@@ -82,11 +82,11 @@ TRAIN:
   t: 5
   max_events_num : 700000
   train_shuffle: True
-  use_amp: False
+  use_amp: True
   amp_dtype: bf16
   deterministic: False
   cudnn_benchmark: True
-  empty_cache_every_batch: False
+  empty_cache_every_batch: True
   model_save_root: save_model/grid_mamba/evuav_streaming_ts
 
 TEST:
