@@ -36,6 +36,30 @@ def scaled_strides(window_size: float):
 
 
 WINDOW_EXPERIMENTS = {
+    "W1": {
+        "group": "window_scaled_swc",
+        "name": "100ms_swc_scaled_grid_checkpoint",
+        "overrides": base.gm(
+            window_size=100.0,
+            scale_strides=scaled_strides(100.0),
+            local_mamba_checkpoint_policy="never",
+            use_stream_mamba_checkpoint=True,
+        ),
+    },
+    "W1F": {
+        "group": "window_scaled_swc",
+        "name": "100ms_swc_finer_spatial_grid",
+        "overrides": base.gm(
+            window_size=100.0,
+            scale_strides=[
+                [32.0, 32.0, 50.0],
+                [64.0, 64.0, 75.0],
+                [128.0, 128.0, 100.0],
+            ],
+            local_mamba_checkpoint_policy="never",
+            use_stream_mamba_checkpoint=True,
+        ),
+    },
     "W3": {
         "group": "window_scaled_swc",
         "name": "200ms_swc_scaled_grid",

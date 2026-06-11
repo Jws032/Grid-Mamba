@@ -6,6 +6,7 @@ from .local_mamba_block import LocalMambaBlock
 from .point_head import PointHead
 from .spatial_window_context import SpatialWindowContext
 from .tsgraph_embedding import TSGraphEmbedding
+from .window_knn_spatial_encoder import WindowKNNSpatialEncoder
 
 
 class GridMambaNet(nn.Module):
@@ -110,6 +111,27 @@ class GridMambaNet(nn.Module):
                 nn.Linear(embed_dim, embed_dim),
             )
 
+        self.use_knn_spatial_encoder = bool(
+            getattr(cfg, "use_knn_spatial_encoder", False)
+        )
+        if self.use_knn_spatial_encoder:
+            self.knn_spatial_encoder = WindowKNNSpatialEncoder(
+                d_model=embed_dim,
+                k_neighbors=getattr(cfg, "knn_spatial_k", 8),
+                spatial_radius=getattr(cfg, "knn_spatial_radius", 24.0),
+                time_radius=getattr(cfg, "knn_time_radius", 100.0),
+                spatial_cell_size=getattr(cfg, "knn_spatial_cell_size", 24.0),
+                time_cell_size=getattr(cfg, "knn_time_cell_size", 100.0),
+                num_heads=getattr(cfg, "knn_spatial_num_heads", 4),
+                dropout=getattr(cfg, "knn_spatial_dropout", 0.1),
+                alpha_init=getattr(cfg, "knn_spatial_alpha_init", 0.1),
+                distance_bias_init=getattr(cfg, "knn_distance_bias_init", 1.0),
+                causal=getattr(cfg, "knn_causal", False),
+                query_chunk_size=getattr(cfg, "knn_query_chunk_size", 1024),
+            )
+        else:
+            self.knn_spatial_encoder = None
+
         # 多尺度 3D grid: [x_stride, y_stride, t_stride]
         self.scale_strides = getattr(
             cfg,
@@ -136,6 +158,8 @@ class GridMambaNet(nn.Module):
             small_bucket_bs=getattr(cfg, "small_bucket_bs", 128),
             mid_bucket_bs=getattr(cfg, "mid_bucket_bs", 64),
             large_bucket_bs=getattr(cfg, "large_bucket_bs", 16),
+            use_bidirectional=getattr(cfg, "use_bidirectional_local_mamba", False),
+            bidir_alpha_init=getattr(cfg, "local_mamba_bidir_alpha_init", 0.1),
         )
 
         self.local_mamba_levels = nn.ModuleList([
@@ -383,6 +407,15 @@ class GridMambaNet(nn.Module):
 
         return self._encode_input_features(points), ts_state
 
+    def _apply_window_knn_spatial_encoder(
+        self,
+        points: torch.Tensor,
+        feats: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.knn_spatial_encoder is None:
+            return feats
+        return self.knn_spatial_encoder(points, feats)
+
     def _forward_one_window(
         self,
         points: torch.Tensor,
@@ -416,6 +449,7 @@ class GridMambaNet(nn.Module):
                 feats, _ = self.ts_encoder.forward_streaming(points, None)
             else:
                 feats = self._encode_input_features(points)
+            feats = self._apply_window_knn_spatial_encoder(points, feats)
             out = self._forward_one_window(points, feats)
             return out, prev_state
 
@@ -468,6 +502,11 @@ class GridMambaNet(nn.Module):
                 else:
                     win_feats = feats_sorted[start:end]
 
+                win_feats = self._apply_window_knn_spatial_encoder(
+                    win_points,
+                    win_feats,
+                )
+
                 outputs.append(self._forward_one_window(win_points, win_feats))
 
             out_sorted = torch.cat(outputs, dim=0)
@@ -489,6 +528,11 @@ class GridMambaNet(nn.Module):
                     )
                 else:
                     win_feats = feats_sorted[start:end]
+
+                win_feats = self._apply_window_knn_spatial_encoder(
+                    win_points,
+                    win_feats,
+                )
 
                 # 4a. 窗口内多尺度特征提取：Multi-scale Local Mamba
                 fused_feat = self._forward_one_window_features(win_points, win_feats)

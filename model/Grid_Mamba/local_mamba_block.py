@@ -26,6 +26,8 @@ class LocalMambaBlock(nn.Module):
         small_bucket_bs: int = 128,
         mid_bucket_bs: int = 64,
         large_bucket_bs: int = 16,
+        use_bidirectional: bool = False,
+        bidir_alpha_init: float = 0.1,
     ):
         super().__init__()
 
@@ -34,6 +36,7 @@ class LocalMambaBlock(nn.Module):
         self.small_bucket_bs = small_bucket_bs
         self.mid_bucket_bs = mid_bucket_bs
         self.large_bucket_bs = large_bucket_bs
+        self.use_bidirectional = bool(use_bidirectional)
 
         self.mamba = Mamba(
             d_model=d_model,
@@ -42,7 +45,39 @@ class LocalMambaBlock(nn.Module):
             expand=expand,
         )
 
+        if self.use_bidirectional:
+            self.mamba_backward = Mamba(
+                d_model=d_model,
+                d_state=d_state,
+                d_conv=d_conv,
+                expand=expand,
+            )
+            self.bidir_alpha = nn.Parameter(torch.tensor(float(bidir_alpha_init)))
+        else:
+            self.mamba_backward = None
+            self.register_parameter("bidir_alpha", None)
+
         self.dropout = nn.Dropout(dropout)
+
+    @staticmethod
+    def _reverse_valid_tokens(
+        x: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """只反转每行有效 token，保持 padding 仍在尾部。"""
+        batch_size, seq_len, channels = x.shape
+        lengths = mask.sum(dim=1)
+
+        pos = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(
+            batch_size,
+            seq_len,
+        )
+        rev_pos = lengths.unsqueeze(1) - 1 - pos
+        rev_pos = rev_pos.clamp(min=0, max=max(seq_len - 1, 0))
+
+        gather_idx = rev_pos.unsqueeze(-1).expand(batch_size, seq_len, channels)
+        reversed_x = torch.gather(x, dim=1, index=gather_idx)
+        return reversed_x * mask.unsqueeze(-1).to(dtype=x.dtype)
 
     def _run_mamba_padded(
         self,
@@ -65,6 +100,12 @@ class LocalMambaBlock(nn.Module):
         x_norm = ((x - mean) / torch.sqrt(var + 1e-5)) * mask_f
 
         out = self.mamba(x_norm)
+        if self.use_bidirectional:
+            x_rev = self._reverse_valid_tokens(x_norm, mask)
+            out_bwd = self.mamba_backward(x_rev)
+            out_bwd = self._reverse_valid_tokens(out_bwd, mask)
+            out = out + self.bidir_alpha * out_bwd
+
         out = self.dropout(out)
 
         return (out + x) * mask_f

@@ -118,6 +118,39 @@ EXPERIMENTS: Dict[str, Dict[str, Any]] = {
         "name": "full",
         "overrides": {},
     },
+    "T0": {
+        "group": "ts_embedding",
+        "name": "full_no_tsgraph_embedding",
+        "overrides": gm(
+            use_ts_embedding=False,
+            use_streaming_ts_embedding=False,
+        ),
+    },
+    "B0": {
+        "group": "bidirectional_local_mamba",
+        "name": "full_bidirectional_local_mamba",
+        "overrides": gm(
+            use_bidirectional_local_mamba=True,
+        ),
+    },
+    "K0": {
+        "group": "knn_spatial_encoder",
+        "name": "full_knn_with_tsgraph",
+        "overrides": gm(
+            use_knn_spatial_encoder=True,
+            use_ts_embedding=True,
+            use_streaming_ts_embedding=True,
+        ),
+    },
+    "K1": {
+        "group": "knn_spatial_encoder",
+        "name": "full_knn_without_tsgraph",
+        "overrides": gm(
+            use_knn_spatial_encoder=True,
+            use_ts_embedding=False,
+            use_streaming_ts_embedding=False,
+        ),
+    },
     # Group 2: SWC internals.
     "S0": {
         "group": "swc_internal",

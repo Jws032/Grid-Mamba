@@ -28,6 +28,20 @@ GRID_MAMBA:
   ts_stream_norm_min_count: 256
   ts_stream_norm_eps: 0.000001
 
+  # Window KNN Spatial Encoder
+  use_knn_spatial_encoder: False
+  knn_spatial_k: 8
+  knn_spatial_radius: 24.0
+  knn_time_radius: 100.0
+  knn_spatial_cell_size: 24.0
+  knn_time_cell_size: 100.0
+  knn_spatial_num_heads: 4
+  knn_spatial_alpha_init: 0.1
+  knn_spatial_dropout: 0.1
+  knn_distance_bias_init: 1.0
+  knn_causal: False
+  knn_query_chunk_size: 1024
+
   # 多尺度 3D grid: [x_stride, y_stride, t_stride]
   scale_strides:
     - [32.0, 32.0, 100.0]
@@ -43,6 +57,8 @@ GRID_MAMBA:
   small_bucket_bs: 128
   mid_bucket_bs: 64
   large_bucket_bs: 16
+  use_bidirectional_local_mamba: False
+  local_mamba_bidir_alpha_init: 0.1
   use_local_mamba_checkpoint: True
   local_mamba_checkpoint_levels: [0]
   local_mamba_checkpoint_policy: adaptive
