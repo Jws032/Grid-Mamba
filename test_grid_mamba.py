@@ -32,6 +32,13 @@ def setup(seed):
     os.environ['PYTHONHASHSEED'] = str(seed_n)
 
 
+def get_single_knn_cache_key(batch):
+    keys = batch.get("knn_cache_key")
+    if isinstance(keys, (list, tuple)) and len(keys) == 1:
+        return keys[0]
+    return None
+
+
 if __name__ == '__main__':
     seed = 37
     setup(seed)
@@ -75,9 +82,10 @@ if __name__ == '__main__':
             points = ev['points'].float().cuda()  # [N, 3]
             label = ev['seg_label'].float().cuda()
             idx = ev['idx_label']
+            knn_cache_key = get_single_knn_cache_key(ev)
 
             # GridMambaNet 前向传播
-            preds, _ = net(points)  # preds: [N, 1]
+            preds, _ = net(points, knn_cache_key=knn_cache_key)  # preds: [N, 1]
             
             point_count = preds.shape[0]  # 点数量
             

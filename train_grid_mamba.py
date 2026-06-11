@@ -65,6 +65,13 @@ def build_dataset(mode):
     raise ValueError(f"Unsupported dataset_name: {dataset_name}")
 
 
+def get_single_knn_cache_key(batch):
+    keys = batch.get("knn_cache_key")
+    if isinstance(keys, (list, tuple)) and len(keys) == 1:
+        return keys[0]
+    return None
+
+
 if __name__ == '__main__':
     seed = 37
     setup(seed)
@@ -146,13 +153,14 @@ if __name__ == '__main__':
         for batch_idx, ev in enumerate(train_dataloader):
             points = ev['points'].float().to(device, non_blocking=True)
             label = ev['seg_label'].float().to(device, non_blocking=True)
+            knn_cache_key = get_single_knn_cache_key(ev)
 
             with torch.autocast(
                 device_type='cuda',
                 dtype=amp_dtype,
                 enabled=use_amp,
             ):
-                preds, _ = net(points)
+                preds, _ = net(points, knn_cache_key=knn_cache_key)
 
             # ===== NaN 检查 =====
             if torch.isnan(preds).any() or torch.isinf(preds).any():
@@ -230,13 +238,14 @@ if __name__ == '__main__':
             for sample, ev in enumerate(val_dataloader):
                 points = ev['points'].float().to(device, non_blocking=True)
                 label = ev['seg_label'].float().to(device, non_blocking=True)
+                knn_cache_key = get_single_knn_cache_key(ev)
 
                 with torch.autocast(
                     device_type='cuda',
                     dtype=amp_dtype,
                     enabled=use_amp,
                 ):
-                    preds, _ = net(points)
+                    preds, _ = net(points, knn_cache_key=knn_cache_key)
 
                 if preds.shape[0] != label.shape[0]:
                     continue

@@ -128,6 +128,10 @@ class GridMambaNet(nn.Module):
                 distance_bias_init=getattr(cfg, "knn_distance_bias_init", 1.0),
                 causal=getattr(cfg, "knn_causal", False),
                 query_chunk_size=getattr(cfg, "knn_query_chunk_size", 1024),
+                use_cache=getattr(cfg, "use_knn_cache", False),
+                cache_root=getattr(cfg, "knn_cache_root", None),
+                cache_splits=getattr(cfg, "knn_cache_splits", None),
+                cache_window_size=self.window_size,
             )
         else:
             self.knn_spatial_encoder = None
@@ -411,10 +415,17 @@ class GridMambaNet(nn.Module):
         self,
         points: torch.Tensor,
         feats: torch.Tensor,
+        knn_cache_key=None,
+        window_id=None,
     ) -> torch.Tensor:
         if self.knn_spatial_encoder is None:
             return feats
-        return self.knn_spatial_encoder(points, feats)
+        return self.knn_spatial_encoder(
+            points,
+            feats,
+            cache_key=knn_cache_key,
+            window_id=window_id,
+        )
 
     def _forward_one_window(
         self,
@@ -424,7 +435,7 @@ class GridMambaNet(nn.Module):
         fused_feat = self._forward_one_window_features(points, feats)
         return self._classify_features(fused_feat)
 
-    def forward(self, points: torch.Tensor, prev_state=None):
+    def forward(self, points: torch.Tensor, prev_state=None, knn_cache_key=None):
         """
         前向传播入口。
 
@@ -449,7 +460,12 @@ class GridMambaNet(nn.Module):
                 feats, _ = self.ts_encoder.forward_streaming(points, None)
             else:
                 feats = self._encode_input_features(points)
-            feats = self._apply_window_knn_spatial_encoder(points, feats)
+            feats = self._apply_window_knn_spatial_encoder(
+                points,
+                feats,
+                knn_cache_key=knn_cache_key,
+                window_id=0,
+            )
             out = self._forward_one_window(points, feats)
             return out, prev_state
 
@@ -505,6 +521,8 @@ class GridMambaNet(nn.Module):
                 win_feats = self._apply_window_knn_spatial_encoder(
                     win_points,
                     win_feats,
+                    knn_cache_key=knn_cache_key,
+                    window_id=int(i),
                 )
 
                 outputs.append(self._forward_one_window(win_points, win_feats))
@@ -532,6 +550,8 @@ class GridMambaNet(nn.Module):
                 win_feats = self._apply_window_knn_spatial_encoder(
                     win_points,
                     win_feats,
+                    knn_cache_key=knn_cache_key,
+                    window_id=int(i),
                 )
 
                 # 4a. 窗口内多尺度特征提取：Multi-scale Local Mamba

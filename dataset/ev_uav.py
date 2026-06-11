@@ -12,9 +12,11 @@ class EvUAV(BaseDataLoader):
         self.root = os.path.join(self.root,mode)
         self.file_list = os.listdir(self.root)
 
-    def __getitem__(self, idx):
-        events = np.load(os.path.join(self.root,self.file_list[idx]))
+    def __getitem__(self, sample_idx):
+        file_name = self.file_list[sample_idx]
+        events = np.load(os.path.join(self.root,file_name))
         evs_norm,ev_loc,seg_label,idx= events['evs_norm'][:,0:4],events['ev_loc'],events['evs_norm'][:,4],events['evs_norm'][:,5]
+        knn_cache_key = f"{self.mode}/{os.path.splitext(file_name)[0]}"
 
         if self.mode=='train':
             num_events = ev_loc.shape[0]
@@ -24,6 +26,7 @@ class EvUAV(BaseDataLoader):
                 evs_norm=evs_norm[dowmsample_idx]
                 seg_label = seg_label[dowmsample_idx]
                 idx = idx[dowmsample_idx]
+                knn_cache_key = None
                 print('downsample')
 
         out={}
@@ -32,6 +35,9 @@ class EvUAV(BaseDataLoader):
         out['points'] = ev_loc[:, 0:3]  # [x,y,t] 原始坐标，将在模型内进行归一化处理
         out['seg_label'] = seg_label  # [0,1]
         out['idx'] = idx
+        out['file_name'] = file_name
+        out['split'] = self.mode
+        out['knn_cache_key'] = knn_cache_key
 
         return out
 

@@ -18,6 +18,9 @@ class BaseDataLoader(torch.utils.data.Dataset):
         points_batches = []
         seg_label_batches = []
         idx_label_batches = []
+        file_names = []
+        splits = []
+        knn_cache_keys = []
 
         for i, ev in enumerate(batch):
             # 直接使用归一化的[x, y, t]作为点云坐标
@@ -30,6 +33,10 @@ class BaseDataLoader(torch.utils.data.Dataset):
 
             idx_label = ev['idx']
             idx_label_batches.append(idx_label)
+
+            file_names.append(ev.get('file_name'))
+            splits.append(ev.get('split'))
+            knn_cache_keys.append(ev.get('knn_cache_key'))
 
         # 合并所有批次的数据
         points_batches = np.concatenate(points_batches, axis=0)
@@ -45,5 +52,8 @@ class BaseDataLoader(torch.utils.data.Dataset):
         output['points'] = points_tensor  # [N, 3] 归一化的[x, y, t]
         output['seg_label'] = seg_label_tensor  # [N]
         output['idx_label'] = idx_label_tensor  # [N]
+        output['file_name'] = file_names
+        output['split'] = splits
+        output['knn_cache_key'] = knn_cache_keys
 
         return output

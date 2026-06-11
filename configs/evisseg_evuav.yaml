@@ -41,6 +41,9 @@ GRID_MAMBA:
   knn_distance_bias_init: 1.0
   knn_causal: False
   knn_query_chunk_size: 1024
+  use_knn_cache: True
+  knn_cache_root: dataset/EV-UAV-dataset/knn_cache
+  knn_cache_splits: [train, val]
 
   # 多尺度 3D grid: [x_stride, y_stride, t_stride]
   scale_strides:

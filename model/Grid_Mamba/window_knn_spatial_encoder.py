@@ -1,5 +1,7 @@
 import math
-from typing import Dict, List, Tuple
+import os
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -27,6 +29,10 @@ class WindowKNNSpatialEncoder(nn.Module):
         distance_bias_init: float = 1.0,
         causal: bool = False,
         query_chunk_size: int = 1024,
+        use_cache: bool = False,
+        cache_root: Optional[str] = None,
+        cache_splits = None,
+        cache_window_size: Optional[float] = None,
     ):
         super().__init__()
         if d_model % num_heads != 0:
@@ -42,6 +48,20 @@ class WindowKNNSpatialEncoder(nn.Module):
         self.head_dim = d_model // num_heads
         self.causal = bool(causal)
         self.query_chunk_size = int(query_chunk_size)
+        self.use_cache = bool(use_cache) and cache_root is not None
+        self.cache_root = Path(cache_root) if cache_root is not None else None
+        self.cache_window_size = cache_window_size
+        if cache_splits is None:
+            self.cache_splits = {"train", "val"}
+        elif isinstance(cache_splits, str):
+            self.cache_splits = {cache_splits}
+        else:
+            self.cache_splits = {str(split) for split in cache_splits}
+        self.cache_version = 1
+        self.cache_signature = self._make_cache_signature()
+        self._reported_cache_hit = False
+        self._reported_cache_write = False
+        self._reported_cache_disabled = False
 
         hidden_dim = max(d_model // 2, 16)
         self.norm = nn.LayerNorm(d_model)
@@ -63,6 +83,132 @@ class WindowKNNSpatialEncoder(nn.Module):
 
         nn.init.normal_(self.out_proj.weight, std=1e-3)
         nn.init.zeros_(self.out_proj.bias)
+
+    @staticmethod
+    def _format_cache_float(value: float) -> str:
+        return f"{float(value):g}".replace("-", "m").replace(".", "p")
+
+    def _make_cache_signature(self) -> str:
+        parts = [
+            f"k{self.k_neighbors}",
+            f"sr{self._format_cache_float(self.spatial_radius)}",
+            f"tr{self._format_cache_float(self.time_radius)}",
+            f"sc{self._format_cache_float(self.spatial_cell_size)}",
+            f"tc{self._format_cache_float(self.time_cell_size)}",
+            f"causal{int(self.causal)}",
+            f"w{self._format_cache_float(self.cache_window_size if self.cache_window_size is not None else -1)}",
+            f"v{self.cache_version}",
+        ]
+        return "_".join(parts)
+
+    def _cache_path(
+        self,
+        cache_key: Optional[str],
+        window_id: Optional[int],
+    ) -> Optional[Path]:
+        if not self.use_cache or cache_key is None or window_id is None:
+            return None
+
+        key_parts = str(cache_key).split("/", 1)
+        if len(key_parts) != 2:
+            if not self._reported_cache_disabled:
+                print(f"[KNN cache] disabled for malformed key: {cache_key}")
+                self._reported_cache_disabled = True
+            return None
+
+        split, sample_name = key_parts
+        if split not in self.cache_splits:
+            return None
+
+        return (
+            self.cache_root
+            / self.cache_signature
+            / split
+            / sample_name
+            / f"window_{int(window_id):04d}.pt"
+        )
+
+    def _load_cached_knn(
+        self,
+        cache_path: Optional[Path],
+        num_points: int,
+        device: torch.device,
+    ):
+        if cache_path is None or not cache_path.exists():
+            return None
+
+        try:
+            cached = torch.load(cache_path, map_location=device)
+        except Exception as exc:
+            print(f"[KNN cache] ignoring unreadable cache {cache_path}: {exc}")
+            return None
+
+        if (
+            not isinstance(cached, dict)
+            or cached.get("cache_version") != self.cache_version
+            or int(cached.get("num_points", -1)) != int(num_points)
+            or "neighbor_idx" not in cached
+            or "neighbor_valid" not in cached
+        ):
+            return None
+
+        neighbor_idx = cached["neighbor_idx"].to(device=device, dtype=torch.long)
+        neighbor_valid = cached["neighbor_valid"].to(device=device, dtype=torch.bool)
+        expected_shape = (num_points, self.k_neighbors)
+        if tuple(neighbor_idx.shape) != expected_shape or tuple(neighbor_valid.shape) != expected_shape:
+            return None
+
+        if not self._reported_cache_hit:
+            print(f"[KNN cache] hit: {cache_path}")
+            self._reported_cache_hit = True
+        return neighbor_idx, neighbor_valid
+
+    def _save_cached_knn(
+        self,
+        cache_path: Optional[Path],
+        neighbor_idx: torch.Tensor,
+        neighbor_valid: torch.Tensor,
+    ) -> None:
+        if cache_path is None:
+            return
+
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "cache_version": self.cache_version,
+                "num_points": int(neighbor_idx.size(0)),
+                "neighbor_idx": neighbor_idx.detach().cpu(),
+                "neighbor_valid": neighbor_valid.detach().cpu(),
+            }
+            tmp_path = cache_path.with_name(
+                f"{cache_path.name}.tmp.{os.getpid()}"
+            )
+            torch.save(payload, tmp_path)
+            os.replace(tmp_path, cache_path)
+            if not self._reported_cache_write:
+                print(f"[KNN cache] write: {cache_path}")
+                self._reported_cache_write = True
+        except Exception as exc:
+            print(f"[KNN cache] could not write {cache_path}: {exc}")
+
+    def _find_knn_cached(
+        self,
+        points: torch.Tensor,
+        cache_key: Optional[str],
+        window_id: Optional[int],
+    ):
+        cache_path = self._cache_path(cache_key, window_id)
+        cached = self._load_cached_knn(
+            cache_path,
+            num_points=int(points.size(0)),
+            device=points.device,
+        )
+        if cached is not None:
+            return cached
+
+        neighbor_idx, neighbor_valid = self._find_knn(points)
+        self._save_cached_knn(cache_path, neighbor_idx, neighbor_valid)
+        return neighbor_idx, neighbor_valid
 
     def _make_cell_index(self, points: torch.Tensor) -> torch.Tensor:
         t0 = points[:, 2].min()
@@ -184,12 +330,22 @@ class WindowKNNSpatialEncoder(nn.Module):
 
         return neighbor_idx, neighbor_valid
 
-    def forward(self, points: torch.Tensor, feats: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        points: torch.Tensor,
+        feats: torch.Tensor,
+        cache_key: Optional[str] = None,
+        window_id: Optional[int] = None,
+    ) -> torch.Tensor:
         if feats.numel() == 0 or feats.size(0) <= 1 or self.k_neighbors <= 0:
             return feats
 
         with torch.no_grad():
-            neighbor_idx, neighbor_valid = self._find_knn(points[:, :3])
+            neighbor_idx, neighbor_valid = self._find_knn_cached(
+                points[:, :3],
+                cache_key,
+                window_id,
+            )
 
         has_neighbors = neighbor_valid.any(dim=1)
         if not has_neighbors.any():
