@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run the two priority KNN parameter ablations after K0/K1.
+"""Run the selected KNN parameter ablations.
 
 This is a thin registry wrapper around tools/run_ablation.py. It reuses the
-same train/test/eval/summarize pipeline, but only registers the two KNN
-parameter experiments chosen after the existing K0/K1 runs.
+same train/test/eval/summarize pipeline, but only registers the KNN parameter
+experiments selected for the ablation_k group.
 """
 
 from __future__ import annotations
@@ -43,7 +43,16 @@ def k1_knn_overrides(
     )
 
 
-KNN_PRIORITY_EXPERIMENTS = {
+KNN_EXPERIMENTS = {
+    "K1": {
+        "group": "ablation_k",
+        "name": "k1_knn_k8_r24_t100",
+        "overrides": k1_knn_overrides(
+            k_neighbors=8,
+            spatial_radius=24.0,
+            time_radius=100.0,
+        ),
+    },
     "K2": {
         "group": "ablation_k",
         "name": "k2_knn_k8_r12_t100",
@@ -53,20 +62,38 @@ KNN_PRIORITY_EXPERIMENTS = {
             time_radius=100.0,
         ),
     },
-    "K3": {
+    "K4": {
         "group": "ablation_k",
-        "name": "k3_knn_k16_r24_t100",
+        "name": "k4_knn_k8_r12_t50",
         "overrides": k1_knn_overrides(
-            k_neighbors=16,
-            spatial_radius=24.0,
+            k_neighbors=8,
+            spatial_radius=12.0,
+            time_radius=50.0,
+        ),
+    },
+    "K5": {
+        "group": "ablation_k",
+        "name": "k5_knn_k8_r16_t100",
+        "overrides": k1_knn_overrides(
+            k_neighbors=8,
+            spatial_radius=16.0,
             time_radius=100.0,
+        ),
+    },
+    "K6": {
+        "group": "ablation_k",
+        "name": "k6_knn_k8_r8_t50",
+        "overrides": k1_knn_overrides(
+            k_neighbors=8,
+            spatial_radius=8.0,
+            time_radius=50.0,
         ),
     },
 }
 
 
 def main() -> int:
-    base.EXPERIMENTS = KNN_PRIORITY_EXPERIMENTS
+    base.EXPERIMENTS = KNN_EXPERIMENTS
     base.DEFAULT_PYTHON = DEFAULT_PYTHON
     base.DEFAULT_OUTPUT_ROOT = DEFAULT_OUTPUT_ROOT
     return base.main()

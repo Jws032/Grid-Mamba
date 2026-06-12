@@ -25,3 +25,5 @@ tools/*
 !tools/run_ablation.py
 !tools/run_window_scaled_ablation.py
 !tools/run_knn_priority_ablation.py
+!tools/run_grid_sequence_conv_ablation.py
+!tools/run_grid_sequence_mha_ablation.py

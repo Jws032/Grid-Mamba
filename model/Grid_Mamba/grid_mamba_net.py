@@ -152,6 +152,108 @@ class GridMambaNet(nn.Module):
             persistent=False,
         )
 
+        self.use_grid_sequence_conv = bool(
+            getattr(cfg, "use_grid_sequence_conv", False)
+        )
+        self.use_grid_sequence_mha = bool(
+            getattr(cfg, "use_grid_sequence_mha", False)
+        )
+        if (
+            self.use_knn_spatial_encoder
+            and (self.use_grid_sequence_conv or self.use_grid_sequence_mha)
+        ):
+            raise ValueError(
+                "KNN spatial encoder cannot be enabled together with grid sequence "
+                "conv or grid sequence MHA"
+            )
+        if self.use_grid_sequence_conv and self.use_grid_sequence_mha:
+            raise ValueError(
+                "use_grid_sequence_conv and use_grid_sequence_mha cannot both be True"
+            )
+
+        self.grid_sequence_conv_kernel_sizes = getattr(
+            cfg,
+            "grid_sequence_conv_kernel_sizes",
+            [3, 5, 9],
+        )
+        if self.use_grid_sequence_conv:
+            if len(self.grid_sequence_conv_kernel_sizes) != len(self.scale_strides):
+                raise ValueError(
+                    "grid_sequence_conv_kernel_sizes length must match scale_strides "
+                    "when use_grid_sequence_conv is True"
+                )
+            self.grid_sequence_conv_kernel_sizes = [
+                int(kernel_size)
+                for kernel_size in self.grid_sequence_conv_kernel_sizes
+            ]
+            for kernel_size in self.grid_sequence_conv_kernel_sizes:
+                if kernel_size <= 0 or kernel_size % 2 == 0:
+                    raise ValueError(
+                        "grid_sequence_conv_kernel_sizes must contain positive odd integers"
+                    )
+        else:
+            self.grid_sequence_conv_kernel_sizes = [
+                int(kernel_size)
+                for kernel_size in self.grid_sequence_conv_kernel_sizes
+            ]
+
+        self.grid_sequence_mha_window_sizes = getattr(
+            cfg,
+            "grid_sequence_mha_window_sizes",
+            [3, 5, 9],
+        )
+        if self.use_grid_sequence_mha:
+            if len(self.grid_sequence_mha_window_sizes) != len(self.scale_strides):
+                raise ValueError(
+                    "grid_sequence_mha_window_sizes length must match scale_strides "
+                    "when use_grid_sequence_mha is True"
+                )
+            self.grid_sequence_mha_window_sizes = [
+                int(window_size)
+                for window_size in self.grid_sequence_mha_window_sizes
+            ]
+            for window_size in self.grid_sequence_mha_window_sizes:
+                if window_size <= 0 or window_size % 2 == 0:
+                    raise ValueError(
+                        "grid_sequence_mha_window_sizes must contain positive odd integers"
+                    )
+        else:
+            self.grid_sequence_mha_window_sizes = [
+                int(window_size)
+                for window_size in self.grid_sequence_mha_window_sizes
+            ]
+
+        grid_sequence_conv_alpha_init = getattr(
+            cfg,
+            "grid_sequence_conv_alpha_init",
+            0.1,
+        )
+        grid_sequence_conv_dropout = getattr(
+            cfg,
+            "grid_sequence_conv_dropout",
+            0.1,
+        )
+        grid_sequence_mha_alpha_init = getattr(
+            cfg,
+            "grid_sequence_mha_alpha_init",
+            0.1,
+        )
+        grid_sequence_mha_dropout = getattr(
+            cfg,
+            "grid_sequence_mha_dropout",
+            0.1,
+        )
+        grid_sequence_mha_num_heads = getattr(
+            cfg,
+            "grid_sequence_mha_num_heads",
+            4,
+        )
+        grid_sequence_mha_distance_bias_init = getattr(
+            cfg,
+            "grid_sequence_mha_distance_bias_init",
+            1.0,
+        )
+
         local_mamba_kwargs = dict(
             d_model=embed_dim,
             d_state=getattr(cfg, "d_state", 16),
@@ -167,8 +269,20 @@ class GridMambaNet(nn.Module):
         )
 
         self.local_mamba_levels = nn.ModuleList([
-            LocalMambaBlock(**local_mamba_kwargs)
-            for _ in self.scale_strides
+            LocalMambaBlock(
+                **local_mamba_kwargs,
+                use_grid_sequence_conv=self.use_grid_sequence_conv,
+                grid_sequence_conv_kernel_size=self.grid_sequence_conv_kernel_sizes[level],
+                grid_sequence_conv_alpha_init=grid_sequence_conv_alpha_init,
+                grid_sequence_conv_dropout=grid_sequence_conv_dropout,
+                use_grid_sequence_mha=self.use_grid_sequence_mha,
+                grid_sequence_mha_window_size=self.grid_sequence_mha_window_sizes[level],
+                grid_sequence_mha_num_heads=grid_sequence_mha_num_heads,
+                grid_sequence_mha_alpha_init=grid_sequence_mha_alpha_init,
+                grid_sequence_mha_dropout=grid_sequence_mha_dropout,
+                grid_sequence_mha_distance_bias_init=grid_sequence_mha_distance_bias_init,
+            )
+            for level in range(len(self.scale_strides))
         ])
 
         # 轻量 grid-relative position encoding：让每个尺度的 Mamba 知道点在当前 3D grid 内的位置。

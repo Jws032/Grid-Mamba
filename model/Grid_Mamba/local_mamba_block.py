@@ -1,6 +1,187 @@
+import math
+
 import torch
 import torch.nn as nn
 from mamba_ssm import Mamba
+
+
+class GridSequenceConv(nn.Module):
+    """Depthwise-separable 1D convolution for grid-local event sequences."""
+
+    def __init__(
+        self,
+        d_model: int,
+        kernel_size: int,
+        dropout: float = 0.1,
+        alpha_init: float = 0.1,
+    ):
+        super().__init__()
+        kernel_size = int(kernel_size)
+        if kernel_size <= 0 or kernel_size % 2 == 0:
+            raise ValueError("grid sequence conv kernel_size must be a positive odd integer")
+
+        self.kernel_size = kernel_size
+        self.alpha = nn.Parameter(torch.tensor(float(alpha_init)))
+        self.depthwise = nn.Conv1d(
+            d_model,
+            d_model,
+            kernel_size=kernel_size,
+            padding=kernel_size // 2,
+            groups=d_model,
+            bias=False,
+        )
+        self.act = nn.GELU()
+        self.pointwise = nn.Conv1d(d_model, d_model, kernel_size=1, bias=True)
+        self.dropout = nn.Dropout(dropout)
+
+        nn.init.zeros_(self.pointwise.weight)
+        nn.init.zeros_(self.pointwise.bias)
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """
+        x:    [B, L, C]
+        mask: [B, L]
+        """
+        mask_f = mask.unsqueeze(-1).to(dtype=x.dtype)
+        conv_in = (x * mask_f).transpose(1, 2).contiguous()
+        conv_out = self.depthwise(conv_in)
+        conv_out = self.act(conv_out)
+        conv_out = self.pointwise(conv_out).transpose(1, 2).contiguous()
+        conv_out = self.dropout(conv_out) * mask_f
+        alpha = self.alpha.to(dtype=x.dtype)
+        return (x + alpha * conv_out) * mask_f
+
+
+class GridSequenceMHA(nn.Module):
+    """Local multi-head attention over grid-local serialized event sequences."""
+
+    def __init__(
+        self,
+        d_model: int,
+        window_size: int,
+        num_heads: int = 4,
+        dropout: float = 0.1,
+        alpha_init: float = 0.1,
+        distance_bias_init: float = 1.0,
+    ):
+        super().__init__()
+        window_size = int(window_size)
+        num_heads = int(num_heads)
+        if window_size <= 0 or window_size % 2 == 0:
+            raise ValueError("grid sequence MHA window_size must be a positive odd integer")
+        if d_model % num_heads != 0:
+            raise ValueError("d_model must be divisible by grid sequence MHA num_heads")
+
+        self.d_model = int(d_model)
+        self.window_size = window_size
+        self.radius = window_size // 2
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+
+        offsets = torch.arange(-self.radius, self.radius + 1, dtype=torch.float32)
+        distance = offsets.abs() / max(float(self.radius), 1.0)
+        self.register_buffer("relative_distance", distance, persistent=False)
+
+        self.q_proj = nn.Linear(d_model, d_model)
+        self.k_proj = nn.Linear(d_model, d_model)
+        self.v_proj = nn.Linear(d_model, d_model)
+        self.out_proj = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+        self.relative_bias = nn.Parameter(torch.zeros(num_heads, window_size))
+        self.alpha = nn.Parameter(torch.tensor(float(alpha_init)))
+        self.distance_bias = nn.Parameter(torch.tensor(float(distance_bias_init)))
+
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+    @staticmethod
+    def _shift_tokens(
+        x: torch.Tensor,
+        mask: torch.Tensor,
+        offset: int,
+    ):
+        if offset == 0:
+            return x, mask
+
+        batch_size, seq_len, channels = x.shape
+        shifted_x = x.new_zeros(batch_size, seq_len, channels)
+        shifted_mask = mask.new_zeros(batch_size, seq_len)
+
+        if offset < 0:
+            start = -offset
+            if start >= seq_len:
+                return shifted_x, shifted_mask
+            shifted_x[:, start:] = x[:, : seq_len + offset]
+            shifted_mask[:, start:] = mask[:, : seq_len + offset]
+        else:
+            end = seq_len - offset
+            if end <= 0:
+                return shifted_x, shifted_mask
+            shifted_x[:, :end] = x[:, offset:]
+            shifted_mask[:, :end] = mask[:, offset:]
+
+        return shifted_x, shifted_mask
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """
+        x:    [B, L, C]
+        mask: [B, L]
+        """
+        batch_size, seq_len, _ = x.shape
+        mask_f = mask.unsqueeze(-1).to(dtype=x.dtype)
+        x_masked = x * mask_f
+
+        neighbor_x = []
+        neighbor_mask = []
+        for offset in range(-self.radius, self.radius + 1):
+            shifted_x, shifted_mask = self._shift_tokens(x_masked, mask, offset)
+            neighbor_x.append(shifted_x)
+            neighbor_mask.append(shifted_mask)
+
+        neighbor_x = torch.stack(neighbor_x, dim=2)
+        neighbor_mask = torch.stack(neighbor_mask, dim=2)
+        attn_valid = neighbor_mask & mask.unsqueeze(-1)
+
+        q = self.q_proj(x_masked).reshape(
+            batch_size,
+            seq_len,
+            self.num_heads,
+            self.head_dim,
+        )
+        k = self.k_proj(neighbor_x).reshape(
+            batch_size,
+            seq_len,
+            self.window_size,
+            self.num_heads,
+            self.head_dim,
+        )
+        v = self.v_proj(neighbor_x).reshape(
+            batch_size,
+            seq_len,
+            self.window_size,
+            self.num_heads,
+            self.head_dim,
+        )
+
+        logits = (q.unsqueeze(2) * k).sum(dim=-1) / math.sqrt(self.head_dim)
+        logits = logits + self.relative_bias.t().unsqueeze(0).unsqueeze(0)
+        distance_penalty = self.distance_bias.to(dtype=logits.dtype)
+        logits = logits - distance_penalty * self.relative_distance.to(
+            dtype=logits.dtype,
+            device=logits.device,
+        ).view(1, 1, self.window_size, 1)
+        logits = logits.masked_fill(~attn_valid.unsqueeze(-1), -1e4)
+
+        weights = torch.softmax(logits, dim=2)
+        weights = weights * attn_valid.unsqueeze(-1).to(dtype=weights.dtype)
+        attn_out = (weights.unsqueeze(-1) * v).sum(dim=2)
+        attn_out = attn_out.reshape(batch_size, seq_len, self.d_model)
+        attn_out = self.out_proj(attn_out)
+        attn_out = self.dropout(attn_out) * mask_f
+
+        alpha = self.alpha.to(dtype=x.dtype)
+        return (x + alpha * attn_out) * mask_f
 
 
 class LocalMambaBlock(nn.Module):
@@ -28,6 +209,16 @@ class LocalMambaBlock(nn.Module):
         large_bucket_bs: int = 16,
         use_bidirectional: bool = False,
         bidir_alpha_init: float = 0.1,
+        use_grid_sequence_conv: bool = False,
+        grid_sequence_conv_kernel_size: int = 3,
+        grid_sequence_conv_alpha_init: float = 0.1,
+        grid_sequence_conv_dropout: float = 0.1,
+        use_grid_sequence_mha: bool = False,
+        grid_sequence_mha_window_size: int = 3,
+        grid_sequence_mha_num_heads: int = 4,
+        grid_sequence_mha_alpha_init: float = 0.1,
+        grid_sequence_mha_dropout: float = 0.1,
+        grid_sequence_mha_distance_bias_init: float = 1.0,
     ):
         super().__init__()
 
@@ -37,6 +228,12 @@ class LocalMambaBlock(nn.Module):
         self.mid_bucket_bs = mid_bucket_bs
         self.large_bucket_bs = large_bucket_bs
         self.use_bidirectional = bool(use_bidirectional)
+        self.use_grid_sequence_conv = bool(use_grid_sequence_conv)
+        self.use_grid_sequence_mha = bool(use_grid_sequence_mha)
+        if self.use_grid_sequence_conv and self.use_grid_sequence_mha:
+            raise ValueError(
+                "use_grid_sequence_conv and use_grid_sequence_mha cannot both be True"
+            )
 
         self.mamba = Mamba(
             d_model=d_model,
@@ -56,6 +253,28 @@ class LocalMambaBlock(nn.Module):
         else:
             self.mamba_backward = None
             self.register_parameter("bidir_alpha", None)
+
+        if self.use_grid_sequence_conv:
+            self.grid_sequence_conv = GridSequenceConv(
+                d_model=d_model,
+                kernel_size=grid_sequence_conv_kernel_size,
+                dropout=grid_sequence_conv_dropout,
+                alpha_init=grid_sequence_conv_alpha_init,
+            )
+        else:
+            self.grid_sequence_conv = None
+
+        if self.use_grid_sequence_mha:
+            self.grid_sequence_mha = GridSequenceMHA(
+                d_model=d_model,
+                window_size=grid_sequence_mha_window_size,
+                num_heads=grid_sequence_mha_num_heads,
+                dropout=grid_sequence_mha_dropout,
+                alpha_init=grid_sequence_mha_alpha_init,
+                distance_bias_init=grid_sequence_mha_distance_bias_init,
+            )
+        else:
+            self.grid_sequence_mha = None
 
         self.dropout = nn.Dropout(dropout)
 
@@ -98,6 +317,10 @@ class LocalMambaBlock(nn.Module):
         var = (((x - mean) * mask_f).pow(2)).sum(dim=1, keepdim=True) / count
 
         x_norm = ((x - mean) / torch.sqrt(var + 1e-5)) * mask_f
+        if self.grid_sequence_conv is not None:
+            x_norm = self.grid_sequence_conv(x_norm, mask)
+        if self.grid_sequence_mha is not None:
+            x_norm = self.grid_sequence_mha(x_norm, mask)
 
         out = self.mamba(x_norm)
         if self.use_bidirectional:

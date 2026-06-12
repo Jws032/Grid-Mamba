@@ -62,6 +62,16 @@ GRID_MAMBA:
   large_bucket_bs: 16
   use_bidirectional_local_mamba: False
   local_mamba_bidir_alpha_init: 0.1
+  use_grid_sequence_conv: False
+  grid_sequence_conv_kernel_sizes: [3, 5, 9]
+  grid_sequence_conv_alpha_init: 0.1
+  grid_sequence_conv_dropout: 0.1
+  use_grid_sequence_mha: False
+  grid_sequence_mha_window_sizes: [3, 5, 9]
+  grid_sequence_mha_num_heads: 4
+  grid_sequence_mha_alpha_init: 0.1
+  grid_sequence_mha_dropout: 0.1
+  grid_sequence_mha_distance_bias_init: 1.0
   use_local_mamba_checkpoint: True
   local_mamba_checkpoint_levels: [0]
   local_mamba_checkpoint_policy: adaptive
