@@ -1,5 +1,6 @@
 import math
 import os
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -62,6 +63,8 @@ class WindowKNNSpatialEncoder(nn.Module):
         self._reported_cache_hit = False
         self._reported_cache_write = False
         self._reported_cache_disabled = False
+        self._latency_profile_enabled = False
+        self.reset_latency_profile()
 
         hidden_dim = max(d_model // 2, 16)
         self.norm = nn.LayerNorm(d_model)
@@ -83,6 +86,40 @@ class WindowKNNSpatialEncoder(nn.Module):
 
         nn.init.normal_(self.out_proj.weight, std=1e-3)
         nn.init.zeros_(self.out_proj.bias)
+
+    def enable_latency_profile(self, enabled: bool = True) -> None:
+        self._latency_profile_enabled = bool(enabled)
+
+    def reset_latency_profile(self) -> None:
+        self._latency_profile = {
+            "num_calls": 0,
+            "skipped_calls": 0,
+            "no_neighbor_calls": 0,
+            "knn_search_ms": 0.0,
+            "knn_mha_ms": 0.0,
+        }
+
+    def get_latency_profile(self) -> Dict[str, float]:
+        return dict(self._latency_profile)
+
+    def _profile_start(self, device: torch.device) -> Optional[float]:
+        if not self._latency_profile_enabled:
+            return None
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        return time.perf_counter()
+
+    def _profile_stop(
+        self,
+        key: str,
+        device: torch.device,
+        started: Optional[float],
+    ) -> None:
+        if started is None:
+            return
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        self._latency_profile[key] += (time.perf_counter() - started) * 1000.0
 
     @staticmethod
     def _format_cache_float(value: float) -> str:
@@ -337,20 +374,30 @@ class WindowKNNSpatialEncoder(nn.Module):
         cache_key: Optional[str] = None,
         window_id: Optional[int] = None,
     ) -> torch.Tensor:
+        if self._latency_profile_enabled:
+            self._latency_profile["num_calls"] += 1
+
         if feats.numel() == 0 or feats.size(0) <= 1 or self.k_neighbors <= 0:
+            if self._latency_profile_enabled:
+                self._latency_profile["skipped_calls"] += 1
             return feats
 
+        search_started = self._profile_start(feats.device)
         with torch.no_grad():
             neighbor_idx, neighbor_valid = self._find_knn_cached(
                 points[:, :3],
                 cache_key,
                 window_id,
             )
+        self._profile_stop("knn_search_ms", feats.device, search_started)
 
         has_neighbors = neighbor_valid.any(dim=1)
         if not has_neighbors.any():
+            if self._latency_profile_enabled:
+                self._latency_profile["no_neighbor_calls"] += 1
             return feats
 
+        mha_started = self._profile_start(feats.device)
         points_f = points[:, :3].float()
         center_coords = points_f.unsqueeze(1)
         neighbor_coords = points_f[neighbor_idx]
@@ -402,4 +449,6 @@ class WindowKNNSpatialEncoder(nn.Module):
         aggregated = self.out_proj(aggregated)
         aggregated = aggregated * has_neighbors.unsqueeze(-1).to(dtype=aggregated.dtype)
 
-        return feats + self.alpha * self.dropout(aggregated)
+        out = feats + self.alpha * self.dropout(aggregated)
+        self._profile_stop("knn_mha_ms", feats.device, mha_started)
+        return out

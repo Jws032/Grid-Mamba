@@ -19,7 +19,6 @@ if str(TOOL_DIR) not in sys.path:
 import run_ablation as base  # noqa: E402
 
 
-DEFAULT_PYTHON = "/home/jzw/miniconda3/envs/grid_mamba/bin/python"
 DEFAULT_OUTPUT_ROOT = (
     base.REPO_ROOT / "save_model" / "grid_mamba" / "ablation_k"
 )
@@ -62,6 +61,15 @@ KNN_EXPERIMENTS = {
             time_radius=100.0,
         ),
     },
+    "K3": {
+        "group": "ablation_k",
+        "name": "k3_knn_k8_r8_t100",
+        "overrides": k1_knn_overrides(
+            k_neighbors=8,
+            spatial_radius=8.0,
+            time_radius=100.0,
+        ),
+    },
     "K4": {
         "group": "ablation_k",
         "name": "k4_knn_k8_r12_t50",
@@ -94,7 +102,6 @@ KNN_EXPERIMENTS = {
 
 def main() -> int:
     base.EXPERIMENTS = KNN_EXPERIMENTS
-    base.DEFAULT_PYTHON = DEFAULT_PYTHON
     base.DEFAULT_OUTPUT_ROOT = DEFAULT_OUTPUT_ROOT
     return base.main()
 
