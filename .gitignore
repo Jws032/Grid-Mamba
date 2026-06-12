@@ -27,3 +27,4 @@ tools/*
 !tools/run_knn_priority_ablation.py
 !tools/run_grid_sequence_conv_ablation.py
 !tools/run_grid_sequence_mha_ablation.py
+!tools/run_sparse_conv_ablation.py

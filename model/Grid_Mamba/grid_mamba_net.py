@@ -7,6 +7,7 @@ from .point_head import PointHead
 from .spatial_window_context import SpatialWindowContext
 from .tsgraph_embedding import TSGraphEmbedding
 from .window_knn_spatial_encoder import WindowKNNSpatialEncoder
+from .window_sparse_conv_encoder import WindowSparseConvEncoder
 
 
 class GridMambaNet(nn.Module):
@@ -114,6 +115,14 @@ class GridMambaNet(nn.Module):
         self.use_knn_spatial_encoder = bool(
             getattr(cfg, "use_knn_spatial_encoder", False)
         )
+        self.use_sparse_conv_encoder = bool(
+            getattr(cfg, "use_sparse_conv_encoder", False)
+        )
+        if self.use_knn_spatial_encoder and self.use_sparse_conv_encoder:
+            raise ValueError(
+                "use_knn_spatial_encoder and use_sparse_conv_encoder cannot both be True"
+            )
+
         if self.use_knn_spatial_encoder:
             self.knn_spatial_encoder = WindowKNNSpatialEncoder(
                 d_model=embed_dim,
@@ -135,6 +144,24 @@ class GridMambaNet(nn.Module):
             )
         else:
             self.knn_spatial_encoder = None
+
+        if self.use_sparse_conv_encoder:
+            self.sparse_conv_encoder = WindowSparseConvEncoder(
+                d_model=embed_dim,
+                voxel_size=getattr(cfg, "sparse_conv_voxel_size", [1.0, 1.0, 1.0]),
+                kernel_size=getattr(cfg, "sparse_conv_kernel_size", [3, 3, 3]),
+                hidden_dim=getattr(cfg, "sparse_conv_hidden_dim", embed_dim),
+                dropout=getattr(cfg, "sparse_conv_dropout", 0.1),
+                alpha_init=getattr(cfg, "sparse_conv_alpha_init", 0.1),
+                norm=getattr(cfg, "sparse_conv_norm", "layernorm"),
+                mode=getattr(cfg, "sparse_conv_mode", "gdsc"),
+                dilations=getattr(cfg, "sparse_conv_dilations", [1, 2, 3, 4]),
+                ad_channels=getattr(cfg, "sparse_conv_ad_channels", 16),
+                use_se=getattr(cfg, "sparse_conv_use_se", True),
+                se_reduction=getattr(cfg, "sparse_conv_se_reduction", 2),
+            )
+        else:
+            self.sparse_conv_encoder = None
 
         # 多尺度 3D grid: [x_stride, y_stride, t_stride]
         self.scale_strides = getattr(
@@ -158,17 +185,19 @@ class GridMambaNet(nn.Module):
         self.use_grid_sequence_mha = bool(
             getattr(cfg, "use_grid_sequence_mha", False)
         )
-        if (
-            self.use_knn_spatial_encoder
-            and (self.use_grid_sequence_conv or self.use_grid_sequence_mha)
-        ):
-            raise ValueError(
-                "KNN spatial encoder cannot be enabled together with grid sequence "
-                "conv or grid sequence MHA"
+        active_window_local_modules = sum(
+            bool(flag)
+            for flag in (
+                self.use_knn_spatial_encoder,
+                self.use_sparse_conv_encoder,
+                self.use_grid_sequence_conv,
+                self.use_grid_sequence_mha,
             )
-        if self.use_grid_sequence_conv and self.use_grid_sequence_mha:
+        )
+        if active_window_local_modules > 1:
             raise ValueError(
-                "use_grid_sequence_conv and use_grid_sequence_mha cannot both be True"
+                "Only one of use_knn_spatial_encoder, use_sparse_conv_encoder, "
+                "use_grid_sequence_conv, or use_grid_sequence_mha can be True"
             )
 
         self.grid_sequence_conv_kernel_sizes = getattr(
@@ -541,6 +570,23 @@ class GridMambaNet(nn.Module):
             window_id=window_id,
         )
 
+    def _apply_window_local_encoder(
+        self,
+        points: torch.Tensor,
+        feats: torch.Tensor,
+        knn_cache_key=None,
+        window_id=None,
+    ) -> torch.Tensor:
+        feats = self._apply_window_knn_spatial_encoder(
+            points,
+            feats,
+            knn_cache_key=knn_cache_key,
+            window_id=window_id,
+        )
+        if self.sparse_conv_encoder is not None:
+            feats = self.sparse_conv_encoder(points, feats)
+        return feats
+
     def _forward_one_window(
         self,
         points: torch.Tensor,
@@ -574,7 +620,7 @@ class GridMambaNet(nn.Module):
                 feats, _ = self.ts_encoder.forward_streaming(points, None)
             else:
                 feats = self._encode_input_features(points)
-            feats = self._apply_window_knn_spatial_encoder(
+            feats = self._apply_window_local_encoder(
                 points,
                 feats,
                 knn_cache_key=knn_cache_key,
@@ -632,7 +678,7 @@ class GridMambaNet(nn.Module):
                 else:
                     win_feats = feats_sorted[start:end]
 
-                win_feats = self._apply_window_knn_spatial_encoder(
+                win_feats = self._apply_window_local_encoder(
                     win_points,
                     win_feats,
                     knn_cache_key=knn_cache_key,
@@ -661,7 +707,7 @@ class GridMambaNet(nn.Module):
                 else:
                     win_feats = feats_sorted[start:end]
 
-                win_feats = self._apply_window_knn_spatial_encoder(
+                win_feats = self._apply_window_local_encoder(
                     win_points,
                     win_feats,
                     knn_cache_key=knn_cache_key,
