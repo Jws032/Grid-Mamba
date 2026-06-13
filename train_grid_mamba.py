@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from dataset.ev_uav import EvUAV
+from dataset.ev_flying import EvFlying
 
 import random
 from model.Grid_Mamba.grid_mamba_net import GridMambaNet
@@ -62,6 +63,8 @@ def build_dataset(mode):
     dataset_name = str(getattr(cfg, "dataset_name", "ev_uav")).lower()
     if dataset_name == "ev_uav":
         return EvUAV(cfg, mode=mode)
+    if dataset_name == "ev_flying":
+        return EvFlying(cfg, mode=mode)
     raise ValueError(f"Unsupported dataset_name: {dataset_name}")
 
 
@@ -164,7 +167,7 @@ if __name__ == '__main__':
 
             # ===== NaN 检查 =====
             if torch.isnan(preds).any() or torch.isinf(preds).any():
-                print("Warning: model output contains NaN/Inf!")
+                print(f"Warning: train output contains NaN/Inf at epoch={epoch}, batch={batch_idx}!")
                 continue
 
             # ===== loss =====
@@ -249,9 +252,15 @@ if __name__ == '__main__':
 
                 if preds.shape[0] != label.shape[0]:
                     continue
+                if torch.isnan(preds).any() or torch.isinf(preds).any():
+                    print(f"Warning: val output contains NaN/Inf at epoch={epoch}, sample={sample}!")
+                    continue
 
                 # ===== val loss =====
                 loss = val_loss_fn(preds.float(), label)
+                if torch.isnan(loss) or torch.isinf(loss):
+                    print(f"Warning: val loss is NaN/Inf at epoch={epoch}, sample={sample}!")
+                    continue
                 val_loss_total += loss.item()
                 val_count += 1
 

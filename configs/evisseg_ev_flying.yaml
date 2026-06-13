@@ -1,0 +1,93 @@
+STRUCTURE:
+  model_name: evissgnet
+  width: 12
+  block_residual: True
+  block_reps: 2
+  use_coords: True
+
+GRID_MAMBA:
+  input_dim: 3
+  embed_dim: 128
+  num_classes: 1
+  sensor_size: [720, 1280]
+
+  use_window: True
+  window_size: 400.0
+  use_grid_pos_encoding: True
+  use_spatial_window_context: True
+
+  tau_t: 50
+  spatial_grid_size: 5
+  time_bin_size: 10.0
+  use_global_density: False
+  use_ts_embedding: True
+
+  scale_strides:
+    - [96.0, 80.0, 100.0]
+    - [192.0, 160.0, 200.0]
+    - [320.0, 240.0, 400.0]
+
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  dropout: 0.15
+  max_seq_len: 1024
+  small_bucket_bs: 128
+  mid_bucket_bs: 64
+  large_bucket_bs: 16
+  use_local_mamba_checkpoint: True
+  local_mamba_checkpoint_levels: [0]
+  local_mamba_checkpoint_policy: adaptive
+  local_mamba_checkpoint_min_window_points: 20000
+
+  spatial_context_stride: 16.0
+  spatial_context_use_conv: True
+  spatial_context_d_state: 16
+  spatial_context_d_conv: 4
+  spatial_context_expand: 1
+  spatial_context_dropout: 0.15
+  spatial_context_alpha_init: 0.1
+  spatial_pool_use_score: True
+  use_stream_mamba_checkpoint: False
+  use_temporal_cell_diffusion: True
+  temporal_cell_diffusion_kernel_size: 3
+  temporal_cell_diffusion_source: dual
+  temporal_context_diffusion_alpha_init: 0.1
+  temporal_context_diffusion_gate_bias: -2.0
+  temporal_token_diffusion_alpha_init: 0.05
+  temporal_token_diffusion_gate_bias: -3.0
+
+DATA:
+  input_channel: 4
+  root: dataset/Ev-Flying-processed
+  dataset_name: ev_flying
+  whole_t: 8000
+  res: [1280, 720]
+
+TRAIN:
+  epochs: 50
+  batch_size: 1
+  train_workers: 8
+  optim: AdamW
+  lr: 0.0001
+  weight_decay: 0.0001
+  k: 3
+  t: 5
+  max_events_num: 700000
+  downsample_seed: 37
+  train_shuffle: True
+  use_amp: True
+  amp_dtype: bf16
+  deterministic: False
+  cudnn_benchmark: True
+  empty_cache_every_batch: False
+  model_save_root: save_model/grid_mamba/ev_flying
+
+TEST:
+  vis: False
+  eval: True
+  roc: False
+  pd_detT: 50
+  correct_thresh: 0.0001
+  save: True
+  model_path: save_model/grid_mamba/ev_flying/best_iou_seed37.pt

@@ -51,6 +51,10 @@ class TSGraphEmbedding(nn.Module):
             nn.Linear(hidden_dim, output_dim),
         )
 
+    def _get_positive_kernel(self):
+        kernel = self.learnable_kernel.float().abs()
+        return kernel / kernel.sum().clamp_min(1e-6)
+
     def _normalize_coordinates(self, points):
         # 保持原有逻辑
         norm_scale = torch.tensor([self.sensor_width, self.sensor_height, self.time_max], device=points.device)
@@ -173,6 +177,7 @@ class TSGraphEmbedding(nn.Module):
         rho = torch.zeros(num_points, device=points.device, dtype=torch.float32)
         local_mean = torch.zeros_like(rho)
         global_density = torch.ones_like(rho)
+        positive_kernel = self._get_positive_kernel()
 
         unique_bins = torch.unique(t_idx, sorted=True)
         for bin_idx in unique_bins:
@@ -202,21 +207,25 @@ class TSGraphEmbedding(nn.Module):
 
             local_ts = torch.nn.functional.conv2d(
                 ts_map.view(1, 1, self.ts_grid_width, self.ts_grid_height),
-                self.learnable_kernel.float(),
+                positive_kernel,
                 padding=1,
             )[0, 0]
 
-            val = local_ts[xb, yb]
+            val = local_ts[xb, yb].clamp_min(0.0)
             rho[idx_b] = val
             local_mean[idx_b] = val.mean()
 
-        periodic_score = rho / (torch.sqrt(global_density) + 1e-6)
-        continuity_score = rho / (local_mean.pow(0.5) + 1e-6)
-        combined_score = periodic_score * continuity_score
+        rho_safe = rho.clamp_min(0.0)
+        global_density_safe = global_density.clamp_min(1e-6)
+        local_mean_safe = local_mean.clamp_min(1e-6)
+        periodic_score = rho_safe / (torch.sqrt(global_density_safe) + 1e-6)
+        continuity_score = rho_safe / (torch.sqrt(local_mean_safe) + 1e-6)
+        combined_score = (periodic_score * continuity_score).clamp_min(0.0)
 
-        log_scores = torch.log1p(combined_score)
+        log_scores = torch.log1p(combined_score.clamp_min(0.0))
         norm_mean, norm_std, state = self._update_score_norm_state(log_scores, state)
         processed_score = (log_scores - norm_mean) / (norm_std + self.stream_norm_eps)
+        processed_score = torch.nan_to_num(processed_score, nan=0.0, posinf=0.0, neginf=0.0)
 
         new_state = dict(state)
         new_state["ts_map"] = ts_map.detach()
@@ -234,7 +243,7 @@ class TSGraphEmbedding(nn.Module):
         with torch.autocast(device_type=autocast_device, enabled=False):
             event_scores = temporal_peak_filter_torch(
                 points=points.float(),
-                kernel=self.learnable_kernel.float(),
+                kernel=self._get_positive_kernel(),
                 sensor_size=self.sensor_size,
                 tau_t=self.tau_t,
                 spatial_grid_size=self.spatial_grid_size,
