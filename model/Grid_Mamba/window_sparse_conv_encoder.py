@@ -1,8 +1,48 @@
-from typing import Sequence
+from typing import Optional, Sequence
 
 import torch
 import torch.nn as nn
 import spconv.pytorch as spconv
+
+
+def _positive_int_list(name: str, values: Sequence[int]) -> list[int]:
+    values = [int(value) for value in values]
+    if not values:
+        raise ValueError(f"{name} must not be empty")
+    if any(value <= 0 for value in values):
+        raise ValueError(f"{name} values must be positive")
+    return values
+
+
+def _resolve_spatial_time_dilations(
+    dilations: Sequence[int],
+    spatial_dilations: Optional[Sequence[int]],
+    time_dilations: Optional[Sequence[int]],
+) -> tuple[list[int], list[int], bool]:
+    if (spatial_dilations is None) != (time_dilations is None):
+        raise ValueError(
+            "sparse_conv_spatial_dilations and sparse_conv_time_dilations "
+            "must be provided together"
+        )
+
+    if spatial_dilations is None:
+        dilations = _positive_int_list("sparse_conv_dilations", dilations)
+        return dilations, dilations, False
+
+    spatial_dilations = _positive_int_list(
+        "sparse_conv_spatial_dilations",
+        spatial_dilations,
+    )
+    time_dilations = _positive_int_list(
+        "sparse_conv_time_dilations",
+        time_dilations,
+    )
+    if len(spatial_dilations) != len(time_dilations):
+        raise ValueError(
+            "sparse_conv_spatial_dilations and sparse_conv_time_dilations "
+            "must have the same length"
+        )
+    return spatial_dilations, time_dilations, True
 
 
 class SparseSE(nn.Module):
@@ -45,33 +85,52 @@ class GroupedDilatedSparseConv(nn.Module):
         channels: int,
         kernel_size_tyx: Sequence[int],
         dilations: Sequence[int],
+        spatial_dilations: Optional[Sequence[int]] = None,
+        time_dilations: Optional[Sequence[int]] = None,
     ):
         super().__init__()
         self.channels = int(channels)
-        self.dilations = [int(dilation) for dilation in dilations]
-        if not self.dilations:
-            raise ValueError("sparse_conv_dilations must not be empty")
-        if any(dilation <= 0 for dilation in self.dilations):
-            raise ValueError("sparse_conv_dilations values must be positive")
-        if self.channels % len(self.dilations) != 0:
+        (
+            self.spatial_dilations,
+            self.time_dilations,
+            self.use_anisotropic_dilation,
+        ) = _resolve_spatial_time_dilations(
+            dilations=dilations,
+            spatial_dilations=spatial_dilations,
+            time_dilations=time_dilations,
+        )
+        self.dilations = self.spatial_dilations
+        if self.channels % len(self.spatial_dilations) != 0:
             raise ValueError("GDSC channels must be divisible by number of dilations")
 
-        self.group_channels = self.channels // len(self.dilations)
+        self.group_channels = self.channels // len(self.spatial_dilations)
         self.convs = nn.ModuleList()
-        for branch_idx, dilation in enumerate(self.dilations):
+        for branch_idx, (spatial_dilation, time_dilation) in enumerate(
+            zip(self.spatial_dilations, self.time_dilations)
+        ):
+            dilation_tyx = [time_dilation, spatial_dilation, spatial_dilation]
             padding = [
-                (int(kernel_size) // 2) * dilation
-                for kernel_size in kernel_size_tyx
+                (int(kernel_size) // 2) * int(dilation)
+                for kernel_size, dilation in zip(kernel_size_tyx, dilation_tyx)
             ]
+            if self.use_anisotropic_dilation:
+                dilation_arg = dilation_tyx
+                indice_key = (
+                    f"window_sparse_gdsc_td{time_dilation}_"
+                    f"sd{spatial_dilation}_b{branch_idx}"
+                )
+            else:
+                dilation_arg = spatial_dilation
+                indice_key = f"window_sparse_gdsc_d{spatial_dilation}_b{branch_idx}"
             self.convs.append(
                 spconv.SubMConv3d(
                     self.group_channels,
                     self.group_channels,
                     kernel_size=list(kernel_size_tyx),
                     padding=padding,
-                    dilation=dilation,
+                    dilation=dilation_arg,
                     bias=False,
-                    indice_key=f"window_sparse_gdsc_d{dilation}_b{branch_idx}",
+                    indice_key=indice_key,
                 )
             )
 
@@ -115,6 +174,8 @@ class WindowSparseConvEncoder(nn.Module):
         norm: str = "layernorm",
         mode: str = "gdsc",
         dilations: Sequence[int] = (1, 2, 3, 4),
+        spatial_dilations: Optional[Sequence[int]] = None,
+        time_dilations: Optional[Sequence[int]] = None,
         ad_channels: int = 16,
         use_se: bool = True,
         se_reduction: int = 2,
@@ -166,6 +227,8 @@ class WindowSparseConvEncoder(nn.Module):
             self._init_gdsc_block(
                 d_model=d_model,
                 dilations=dilations,
+                spatial_dilations=spatial_dilations,
+                time_dilations=time_dilations,
                 ad_channels=ad_channels,
                 use_se=use_se,
                 se_reduction=se_reduction,
@@ -198,6 +261,9 @@ class WindowSparseConvEncoder(nn.Module):
         )
         self.actual_ad_channels = None
         self.dilations = None
+        self.spatial_dilations = None
+        self.time_dilations = None
+        self.use_anisotropic_dilation = False
         self.use_se = False
         self._zero_init_out_conv()
 
@@ -205,24 +271,31 @@ class WindowSparseConvEncoder(nn.Module):
         self,
         d_model: int,
         dilations: Sequence[int],
+        spatial_dilations: Optional[Sequence[int]],
+        time_dilations: Optional[Sequence[int]],
         ad_channels: int,
         use_se: bool,
         se_reduction: int,
     ) -> None:
-        dilations = [int(dilation) for dilation in dilations]
-        if not dilations:
-            raise ValueError("sparse_conv_dilations must not be empty")
-        if any(dilation <= 0 for dilation in dilations):
-            raise ValueError("sparse_conv_dilations values must be positive")
+        spatial_dilations, time_dilations, use_anisotropic_dilation = (
+            _resolve_spatial_time_dilations(
+                dilations=dilations,
+                spatial_dilations=spatial_dilations,
+                time_dilations=time_dilations,
+            )
+        )
 
         target_channels = int(d_model) + max(int(ad_channels), 0)
-        branch_count = len(dilations)
+        branch_count = len(spatial_dilations)
         while target_channels % branch_count != 0:
             target_channels += 1
 
         self.hidden_dim = target_channels
         self.actual_ad_channels = target_channels - int(d_model)
-        self.dilations = dilations
+        self.dilations = spatial_dilations
+        self.spatial_dilations = spatial_dilations
+        self.time_dilations = time_dilations
+        self.use_anisotropic_dilation = use_anisotropic_dilation
         self.use_se = bool(use_se)
 
         self.in_conv = spconv.SubMConv3d(
@@ -237,6 +310,8 @@ class WindowSparseConvEncoder(nn.Module):
             channels=target_channels,
             kernel_size_tyx=self.kernel_tyx,
             dilations=dilations,
+            spatial_dilations=spatial_dilations if use_anisotropic_dilation else None,
+            time_dilations=time_dilations if use_anisotropic_dilation else None,
         )
         self.se = SparseSE(target_channels, reduction=se_reduction) if self.use_se else None
         self.out_conv = spconv.SubMConv3d(

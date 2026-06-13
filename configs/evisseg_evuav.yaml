@@ -51,6 +51,8 @@ GRID_MAMBA:
   sparse_conv_kernel_size: [3, 3, 3]
   sparse_conv_mode: gdsc
   sparse_conv_dilations: [1, 2, 3, 4]
+  sparse_conv_spatial_dilations: null
+  sparse_conv_time_dilations: null
   sparse_conv_hidden_dim: 128
   sparse_conv_ad_channels: 16
   sparse_conv_use_se: True

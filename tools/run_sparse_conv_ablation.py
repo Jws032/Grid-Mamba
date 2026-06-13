@@ -25,9 +25,11 @@ def sparse_conv_overrides(
     kernel_size,
     mode="gdsc",
     dilations=(1, 2, 3, 4),
+    spatial_dilations=None,
+    time_dilations=None,
     use_se=True,
 ):
-    return base.gm(
+    overrides = base.gm(
         use_knn_spatial_encoder=False,
         use_ts_embedding=False,
         use_streaming_ts_embedding=False,
@@ -40,6 +42,12 @@ def sparse_conv_overrides(
         sparse_conv_dilations=list(dilations),
         sparse_conv_use_se=bool(use_se),
     )
+    grid_mamba = overrides["GRID_MAMBA"]
+    if spatial_dilations is not None:
+        grid_mamba["sparse_conv_spatial_dilations"] = list(spatial_dilations)
+    if time_dilations is not None:
+        grid_mamba["sparse_conv_time_dilations"] = list(time_dilations)
+    return overrides
 
 
 SPARSE_CONV_EXPERIMENTS = {
@@ -101,6 +109,58 @@ SPARSE_CONV_EXPERIMENTS = {
             mode="gdsc",
             dilations=[1, 2, 3, 4],
             use_se=False,
+        ),
+    },
+    "SC7": {
+        "group": "sparse_conv_encoder",
+        "name": "sparse_conv_gdsc_v1_1_1_sd1_2_3_4_td1_1_2_2_se",
+        "overrides": sparse_conv_overrides(
+            [1.0, 1.0, 1.0],
+            [3, 3, 3],
+            mode="gdsc",
+            dilations=[1, 2, 3, 4],
+            spatial_dilations=[1, 2, 3, 4],
+            time_dilations=[1, 1, 2, 2],
+            use_se=True,
+        ),
+    },
+    "SC8": {
+        "group": "sparse_conv_encoder",
+        "name": "sparse_conv_gdsc_v1_1_1_sd1_2_3_4_td1_2_2_3_se",
+        "overrides": sparse_conv_overrides(
+            [1.0, 1.0, 1.0],
+            [3, 3, 3],
+            mode="gdsc",
+            dilations=[1, 2, 3, 4],
+            spatial_dilations=[1, 2, 3, 4],
+            time_dilations=[1, 2, 2, 3],
+            use_se=True,
+        ),
+    },
+    "SC9": {
+        "group": "sparse_conv_encoder",
+        "name": "sparse_conv_gdsc_v1_1_1_sd1_2_3_4_td1_2_4_8_se",
+        "overrides": sparse_conv_overrides(
+            [1.0, 1.0, 1.0],
+            [3, 3, 3],
+            mode="gdsc",
+            dilations=[1, 2, 3, 4],
+            spatial_dilations=[1, 2, 3, 4],
+            time_dilations=[1, 2, 4, 8],
+            use_se=True,
+        ),
+    },
+    "SC10": {
+        "group": "sparse_conv_encoder",
+        "name": "sparse_conv_gdsc_v1_1_1_sd1_1_2_2_td1_4_8_16_se",
+        "overrides": sparse_conv_overrides(
+            [1.0, 1.0, 1.0],
+            [3, 3, 3],
+            mode="gdsc",
+            dilations=[1, 2, 3, 4],
+            spatial_dilations=[1, 1, 2, 2],
+            time_dilations=[1, 4, 8, 16],
+            use_se=True,
         ),
     },
 }

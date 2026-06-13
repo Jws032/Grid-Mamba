@@ -156,6 +156,16 @@ class GridMambaNet(nn.Module):
                 norm=getattr(cfg, "sparse_conv_norm", "layernorm"),
                 mode=getattr(cfg, "sparse_conv_mode", "gdsc"),
                 dilations=getattr(cfg, "sparse_conv_dilations", [1, 2, 3, 4]),
+                spatial_dilations=getattr(
+                    cfg,
+                    "sparse_conv_spatial_dilations",
+                    None,
+                ),
+                time_dilations=getattr(
+                    cfg,
+                    "sparse_conv_time_dilations",
+                    None,
+                ),
                 ad_channels=getattr(cfg, "sparse_conv_ad_channels", 16),
                 use_se=getattr(cfg, "sparse_conv_use_se", True),
                 se_reduction=getattr(cfg, "sparse_conv_se_reduction", 2),
