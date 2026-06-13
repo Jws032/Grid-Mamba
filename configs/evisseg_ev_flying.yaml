@@ -19,8 +19,26 @@ GRID_MAMBA:
   tau_t: 50
   spatial_grid_size: 5
   time_bin_size: 10.0
-  use_global_density: False
-  use_ts_embedding: True
+  use_global_density: True
+  use_ts_embedding: False
+  use_streaming_ts_embedding: False
+  ts_stream_norm_min_count: 256
+  ts_stream_norm_eps: 0.000001
+
+  use_knn_spatial_encoder: False
+
+  use_sparse_conv_encoder: True
+  sparse_conv_voxel_size: [1.0, 1.0, 1.0]
+  sparse_conv_kernel_size: [3, 3, 3]
+  sparse_conv_mode: gdsc
+  sparse_conv_dilations: [1, 2, 3, 4]
+  sparse_conv_hidden_dim: 128
+  sparse_conv_ad_channels: 16
+  sparse_conv_use_se: True
+  sparse_conv_se_reduction: 2
+  sparse_conv_alpha_init: 0.1
+  sparse_conv_dropout: 0.1
+  sparse_conv_norm: layernorm
 
   scale_strides:
     - [96.0, 80.0, 100.0]
@@ -35,6 +53,10 @@ GRID_MAMBA:
   small_bucket_bs: 128
   mid_bucket_bs: 64
   large_bucket_bs: 16
+  use_bidirectional_local_mamba: False
+  local_mamba_bidir_alpha_init: 0.1
+  use_grid_sequence_conv: False
+  use_grid_sequence_mha: False
   use_local_mamba_checkpoint: True
   local_mamba_checkpoint_levels: [0]
   local_mamba_checkpoint_policy: adaptive
@@ -51,7 +73,7 @@ GRID_MAMBA:
   use_stream_mamba_checkpoint: False
   use_temporal_cell_diffusion: True
   temporal_cell_diffusion_kernel_size: 3
-  temporal_cell_diffusion_source: dual
+  temporal_cell_diffusion_source: prev_context
   temporal_context_diffusion_alpha_init: 0.1
   temporal_context_diffusion_gate_bias: -2.0
   temporal_token_diffusion_alpha_init: 0.05
