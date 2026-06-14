@@ -23,8 +23,8 @@ GRID_MAMBA:
   spatial_grid_size: 5
   time_bin_size: 10.0
   use_global_density: True
-  use_ts_embedding: True
-  use_streaming_ts_embedding: True
+  use_ts_embedding: False
+  use_streaming_ts_embedding: False
   ts_stream_norm_min_count: 256
   ts_stream_norm_eps: 0.000001
 
@@ -46,8 +46,8 @@ GRID_MAMBA:
   knn_cache_splits: [train, val]
 
   # Window Sparse Conv Encoder
-  use_sparse_conv_encoder: False
-  sparse_conv_voxel_size: [1.0, 1.0, 1.0]
+  use_sparse_conv_encoder: True
+  sparse_conv_voxel_size: [1.0, 1.0, 4.0]
   sparse_conv_kernel_size: [3, 3, 3]
   sparse_conv_mode: gdsc
   sparse_conv_dilations: [1, 2, 3, 4]
@@ -132,7 +132,8 @@ TRAIN:
   deterministic: False
   cudnn_benchmark: True
   empty_cache_every_batch: True
-  model_save_root: save_model/grid_mamba/evuav_streaming_ts
+  early_stopping: False
+  model_save_root: save_model/grid_mamba/evuav_sc12_fixed50
 
 TEST:
   vis: False
@@ -141,4 +142,4 @@ TEST:
   pd_detT: 50
   correct_thresh: 0.0001
   save: True
-  model_path: save_model/grid_mamba/evuav_streaming_ts/best_loss_seed37.pt
+  model_path: save_model/grid_mamba/evuav_sc12_fixed50/best_loss_seed37.pt

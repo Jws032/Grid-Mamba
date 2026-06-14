@@ -116,9 +116,10 @@ if __name__ == '__main__':
     best_loss = 1e5
     best_iou = 0
 
-    # ===== 新增：early stopping =====
+    # ===== early stopping =====
+    use_early_stopping = bool(getattr(cfg, 'early_stopping', True))
     best_val_loss = 1e5
-    patience = 20
+    patience = int(getattr(cfg, 'early_stopping_patience', 20))
     no_improve_epoch = 0
 
     # ===== val =====
@@ -293,12 +294,13 @@ if __name__ == '__main__':
                 best_iou = iou.item()
 
             # ===== early stopping =====
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                no_improve_epoch = 0
-            else:
-                no_improve_epoch += 1
+            if use_early_stopping:
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    no_improve_epoch = 0
+                else:
+                    no_improve_epoch += 1
 
-            if no_improve_epoch >= patience:
-                print(f"\nEarly stopping triggered at epoch {epoch}")
-                break
+                if no_improve_epoch >= patience:
+                    print(f"\nEarly stopping triggered at epoch {epoch}")
+                    break

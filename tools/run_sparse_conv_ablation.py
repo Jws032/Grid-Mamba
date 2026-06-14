@@ -14,7 +14,7 @@ if str(TOOL_DIR) not in sys.path:
 import run_ablation as base  # noqa: E402
 
 
-DEFAULT_PYTHON = base.DEFAULT_PYTHON
+DEFAULT_PYTHON = sys.executable
 DEFAULT_OUTPUT_ROOT = (
     base.REPO_ROOT / "save_model" / "grid_mamba" / "ablation_sparse_conv"
 )
