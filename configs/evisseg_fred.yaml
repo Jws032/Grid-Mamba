@@ -1,0 +1,142 @@
+STRUCTURE:
+  model_name: evissgnet
+  width: 12
+  block_residual: True
+  block_reps: 2
+  use_coords: True
+
+GRID_MAMBA:
+  input_dim: 3
+  embed_dim: 128
+  num_classes: 1
+  sensor_size: [720, 1280]
+
+  use_window: True
+  window_size: 400.0
+  use_grid_pos_encoding: True
+  use_spatial_window_context: True
+
+  tau_t: 50
+  spatial_grid_size: 5
+  time_bin_size: 10.0
+  use_global_density: True
+  use_ts_embedding: False
+  use_streaming_ts_embedding: False
+  ts_stream_norm_min_count: 256
+  ts_stream_norm_eps: 0.000001
+
+  use_knn_spatial_encoder: False
+  knn_spatial_k: 8
+  knn_spatial_radius: 24.0
+  knn_time_radius: 100.0
+  knn_spatial_cell_size: 24.0
+  knn_time_cell_size: 100.0
+  knn_spatial_num_heads: 4
+  knn_spatial_alpha_init: 0.1
+  knn_spatial_dropout: 0.1
+  knn_distance_bias_init: 1.0
+  knn_causal: False
+  knn_query_chunk_size: 1024
+  use_knn_cache: False
+  knn_cache_root: dataset/FRED_segmentation/knn_cache
+  knn_cache_splits: [train, val]
+
+  use_sparse_conv_encoder: True
+  sparse_conv_voxel_size: [1.0, 1.0, 4.0]
+  sparse_conv_kernel_size: [3, 3, 3]
+  sparse_conv_mode: gdsc
+  sparse_conv_dilations: [1, 2, 3, 4]
+  sparse_conv_spatial_dilations: null
+  sparse_conv_time_dilations: null
+  sparse_conv_hidden_dim: 128
+  sparse_conv_ad_channels: 16
+  sparse_conv_use_se: True
+  sparse_conv_se_reduction: 2
+  sparse_conv_alpha_init: 0.1
+  sparse_conv_dropout: 0.1
+  sparse_conv_norm: layernorm
+
+  scale_strides:
+    - [80.0, 60.0, 100.0]
+    - [180.0, 120.0, 200.0]
+    - [480.0, 360.0, 400.0]
+
+  d_state: 16
+  d_conv: 4
+  expand: 2
+  dropout: 0.1
+  max_seq_len: 1024
+  small_bucket_bs: 64
+  mid_bucket_bs: 32
+  large_bucket_bs: 8
+  use_bidirectional_local_mamba: False
+  local_mamba_bidir_alpha_init: 0.1
+  use_grid_sequence_conv: False
+  grid_sequence_conv_kernel_sizes: [3, 5, 9]
+  grid_sequence_conv_alpha_init: 0.1
+  grid_sequence_conv_dropout: 0.1
+  use_grid_sequence_mha: False
+  grid_sequence_mha_window_sizes: [3, 5, 9]
+  grid_sequence_mha_num_heads: 4
+  grid_sequence_mha_alpha_init: 0.1
+  grid_sequence_mha_dropout: 0.1
+  grid_sequence_mha_distance_bias_init: 1.0
+  use_local_mamba_checkpoint: True
+  local_mamba_checkpoint_levels: [0]
+  local_mamba_checkpoint_policy: adaptive
+  local_mamba_checkpoint_min_window_points: 20000
+
+  spatial_context_stride: 24.0
+  spatial_context_use_conv: True
+  spatial_context_d_state: 16
+  spatial_context_d_conv: 4
+  spatial_context_expand: 1
+  spatial_context_dropout: 0.1
+  spatial_context_alpha_init: 0.1
+  spatial_pool_use_score: True
+  use_stream_mamba_checkpoint: True
+  use_temporal_cell_diffusion: True
+  temporal_cell_diffusion_kernel_size: 3
+  temporal_cell_diffusion_source: prev_context
+  temporal_context_diffusion_alpha_init: 0.1
+  temporal_context_diffusion_gate_bias: -2.0
+  temporal_token_diffusion_alpha_init: 0.05
+  temporal_token_diffusion_gate_bias: -3.0
+
+DATA:
+  dataset_name: fred_segmentation
+  input_channel: 4
+  root: /home/jzw/experiments/datasets/FRED_segmentation
+  whole_t: 8000
+  res: [1280, 720]
+
+TRAIN:
+  epochs: 50
+  batch_size: 1
+  train_workers: 2
+  optim: Adam
+  lr: 0.001
+  k: 3
+  t: 5
+  max_events_num: 500000
+  downsample_seed: 37
+  fred_downsample_modes: [train, val, test]
+  fred_random_downsample_train: True
+  train_shuffle: True
+  use_amp: True
+  amp_dtype: bf16
+  deterministic: False
+  cudnn_benchmark: True
+  empty_cache_every_batch: True
+  early_stopping: False
+  model_save_root: save_model/grid_mamba/fred_segmentation/SC12_GS_G4_FINE_LOW_MID
+
+TEST:
+  vis: False
+  eval: True
+  roc: False
+  pd_detT: 50
+  correct_thresh: 0.0001
+  save: True
+  model_path: save_model/grid_mamba/fred_segmentation/SC12_GS_G4_FINE_LOW_MID/best_loss_seed37.pt
+  output_path: save_model/grid_mamba/fred_segmentation/SC12_GS_G4_FINE_LOW_MID/test_best_loss/predictions.txt
