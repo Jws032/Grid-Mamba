@@ -14,10 +14,8 @@ class SpatialWindowContext(nn.Module):
     - 在点云检测/分割任务中，将点云按窗口 (window) 划分，跨窗口建模空间上下文。
     - 每个窗口的点通过可学习评分聚合为一个低分辨率 spatial token map (H_s, W_s)。
     - 对所有窗口的 token map 按空间位置形成时序序列，用 Mamba (状态空间模型) 捕获跨窗口的长程依赖。
-    - 支持两种使用模式：
-        * forward(): 离线批量处理，一次性传入所有窗口，利用完整 Mamba 前向。
-        * forward_streaming() / step(): 逐窗口流式处理，维护 Mamba 隐状态，
-          适用于在线推理或训练时的 memory-efficient 逐步计算。
+    - 使用 step() 逐窗口流式处理，维护 Mamba 隐状态，
+      适用于在线推理或训练时的 memory-efficient 逐步计算。
 
     主要组件：
     1. 空间池化：加权聚合窗口内点到空间网格 (cell)。
@@ -587,81 +585,3 @@ class SpatialWindowContext(nn.Module):
         enhanced_feat = fused_feat + alpha * point_context
 
         return enhanced_feat, state
-
-    def forward_streaming(
-        self,
-        window_points: list,
-        window_feats: list,
-        state=None,
-    ):
-        """
-        对所有窗口顺序执行流式 step，返回增强后的特征列表和最终状态。
-        """
-        enhanced_feats = []
-
-        for points, feat in zip(window_points, window_feats):
-            enhanced_feat, state = self.step(points, feat, state)
-            enhanced_feats.append(enhanced_feat)
-
-        return enhanced_feats, state
-
-    def forward(
-        self,
-        window_points: list,
-        window_feats: list,
-    ) -> list:
-        """
-        离线批量处理全部窗口。
-        流程：
-        1. 每个窗口独立池化出空间 token map -> stack 为 [T, H_s, W_s, C]
-        2. 重排为 [H_s*W_s, T, C] 送入 Mamba (沿时间轴建模每个 cell)
-        3. 可选的 3x3 空间卷积平滑 context
-        4. 按 cell 索引把 context 残差加回各个窗口的点特征
-        """
-        if len(window_feats) <= 1:
-            return window_feats
-
-        token_maps = [
-            self._pool_window_to_spatial_map(points, feat)
-            for points, feat in zip(window_points, window_feats)
-        ]
-
-        # [T, H, W, C]
-        token_maps = torch.stack(token_maps, dim=0)
-        num_windows, height, width, channels = token_maps.shape
-
-        # 对每个空间 cell 沿时间建模：[H*W, T, C]
-        temporal_tokens = token_maps.permute(1, 2, 0, 3).reshape(
-            height * width,
-            num_windows,
-            channels,
-        )
-        temporal_tokens = self.spatial_context_norm(temporal_tokens)
-
-        context_tokens = self.spatial_context_mamba(temporal_tokens)
-        context_tokens = self.spatial_context_dropout(context_tokens)
-
-        # 还原为 [T, H, W, C]
-        context_maps = context_tokens.reshape(
-            height,
-            width,
-            num_windows,
-            channels,
-        ).permute(2, 0, 1, 3).contiguous()
-
-        if self.spatial_context_use_conv:
-            # [T, C, H, W]
-            context_nchw = context_maps.permute(0, 3, 1, 2).contiguous()
-            context_nchw = self.spatial_context_conv(context_nchw)
-            context_maps = context_nchw.permute(0, 2, 3, 1).contiguous()
-
-        alpha = self.spatial_context_alpha.to(dtype=window_feats[0].dtype)
-        enhanced_feats = []
-        flat_context_maps = context_maps.view(num_windows, height * width, channels)
-
-        for i, (points, feat) in enumerate(zip(window_points, window_feats)):
-            cell_idx = self._get_spatial_cell_indices(points)
-            point_context = flat_context_maps[i, cell_idx]
-            enhanced_feats.append(feat + alpha * point_context)
-
-        return enhanced_feats

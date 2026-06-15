@@ -13,7 +13,6 @@ GRID_MAMBA:
   sensor_size: [260, 346]   # [height, width]，与模型内部顺序一致
 
   # Window / ablation 开关
-  use_window: True
   window_size: 400.0
   use_grid_pos_encoding: True
   use_spatial_window_context: True
@@ -49,22 +48,18 @@ GRID_MAMBA:
   use_sparse_conv_encoder: True
   sparse_conv_voxel_size: [1.0, 1.0, 4.0]
   sparse_conv_kernel_size: [3, 3, 3]
-  sparse_conv_mode: gdsc
   sparse_conv_dilations: [1, 2, 3, 4]
   sparse_conv_spatial_dilations: null
   sparse_conv_time_dilations: null
-  sparse_conv_hidden_dim: 128
   sparse_conv_ad_channels: 16
-  sparse_conv_use_se: True
   sparse_conv_se_reduction: 2
   sparse_conv_alpha_init: 0.1
   sparse_conv_dropout: 0.1
-  sparse_conv_norm: layernorm
 
   # 多尺度 3D grid: [x_stride, y_stride, t_stride]
   scale_strides:
-    - [32.0, 32.0, 100.0]
-    - [64.0, 64.0, 200.0]
+    - [24.0, 24.0, 100.0]
+    - [48.0, 48.0, 200.0]
     - [128.0, 128.0, 400.0]
 
   # LocalMambaBlock
@@ -76,18 +71,6 @@ GRID_MAMBA:
   small_bucket_bs: 128
   mid_bucket_bs: 64
   large_bucket_bs: 16
-  use_bidirectional_local_mamba: False
-  local_mamba_bidir_alpha_init: 0.1
-  use_grid_sequence_conv: False
-  grid_sequence_conv_kernel_sizes: [3, 5, 9]
-  grid_sequence_conv_alpha_init: 0.1
-  grid_sequence_conv_dropout: 0.1
-  use_grid_sequence_mha: False
-  grid_sequence_mha_window_sizes: [3, 5, 9]
-  grid_sequence_mha_num_heads: 4
-  grid_sequence_mha_alpha_init: 0.1
-  grid_sequence_mha_dropout: 0.1
-  grid_sequence_mha_distance_bias_init: 1.0
   use_local_mamba_checkpoint: True
   local_mamba_checkpoint_levels: [0]
   local_mamba_checkpoint_policy: adaptive

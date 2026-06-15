@@ -168,16 +168,12 @@ class WindowSparseConvEncoder(nn.Module):
         d_model: int,
         voxel_size: Sequence[float] = (1.0, 1.0, 1.0),
         kernel_size: Sequence[int] = (3, 3, 3),
-        hidden_dim: int = 128,
         dropout: float = 0.1,
         alpha_init: float = 0.1,
-        norm: str = "layernorm",
-        mode: str = "gdsc",
         dilations: Sequence[int] = (1, 2, 3, 4),
         spatial_dilations: Optional[Sequence[int]] = None,
         time_dilations: Optional[Sequence[int]] = None,
         ad_channels: int = 16,
-        use_se: bool = True,
         se_reduction: int = 2,
     ):
         super().__init__()
@@ -197,16 +193,7 @@ class WindowSparseConvEncoder(nn.Module):
                 "sparse_conv_kernel_size values must be positive odd integers"
             )
 
-        norm = str(norm).lower()
-        if norm not in {"layernorm", "none"}:
-            raise ValueError("sparse_conv_norm must be 'layernorm' or 'none'")
-
-        mode = str(mode).lower()
-        if mode not in {"simple", "gdsc"}:
-            raise ValueError("sparse_conv_mode must be 'simple' or 'gdsc'")
-
         self.d_model = int(d_model)
-        self.mode = mode
         self.kernel_size = kernel_size
         self.register_buffer(
             "voxel_size",
@@ -214,58 +201,21 @@ class WindowSparseConvEncoder(nn.Module):
             persistent=False,
         )
         self.alpha = nn.Parameter(torch.tensor(float(alpha_init)))
-        self.norm = nn.LayerNorm(d_model) if norm == "layernorm" else nn.Identity()
+        self.norm = nn.LayerNorm(d_model)
         self.act = nn.GELU()
         self.dropout = nn.Dropout(dropout)
 
         # spconv uses spatial_shape order [z, y, x], so kernel/padding are [t, y, x].
         self.kernel_tyx = [kernel_size[2], kernel_size[1], kernel_size[0]]
 
-        if self.mode == "simple":
-            self._init_simple_block(d_model, hidden_dim)
-        else:
-            self._init_gdsc_block(
-                d_model=d_model,
-                dilations=dilations,
-                spatial_dilations=spatial_dilations,
-                time_dilations=time_dilations,
-                ad_channels=ad_channels,
-                use_se=use_se,
-                se_reduction=se_reduction,
-            )
-
-    def _init_simple_block(self, d_model: int, hidden_dim: int) -> None:
-        hidden_dim = int(hidden_dim)
-        if hidden_dim <= 0:
-            raise ValueError("sparse_conv_hidden_dim must be positive")
-
-        self.hidden_dim = hidden_dim
-        padding_tyx = [value // 2 for value in self.kernel_tyx]
-        self.in_conv = spconv.SubMConv3d(
-            d_model,
-            hidden_dim,
-            kernel_size=self.kernel_tyx,
-            padding=padding_tyx,
-            bias=False,
-            indice_key="window_sparse_simple_in",
+        self._init_gdsc_block(
+            d_model=d_model,
+            dilations=dilations,
+            spatial_dilations=spatial_dilations,
+            time_dilations=time_dilations,
+            ad_channels=ad_channels,
+            se_reduction=se_reduction,
         )
-        self.gdsc_conv = None
-        self.se = None
-        self.out_conv = spconv.SubMConv3d(
-            hidden_dim,
-            d_model,
-            kernel_size=1,
-            padding=0,
-            bias=True,
-            indice_key="window_sparse_simple_out",
-        )
-        self.actual_ad_channels = None
-        self.dilations = None
-        self.spatial_dilations = None
-        self.time_dilations = None
-        self.use_anisotropic_dilation = False
-        self.use_se = False
-        self._zero_init_out_conv()
 
     def _init_gdsc_block(
         self,
@@ -274,7 +224,6 @@ class WindowSparseConvEncoder(nn.Module):
         spatial_dilations: Optional[Sequence[int]],
         time_dilations: Optional[Sequence[int]],
         ad_channels: int,
-        use_se: bool,
         se_reduction: int,
     ) -> None:
         spatial_dilations, time_dilations, use_anisotropic_dilation = (
@@ -296,7 +245,6 @@ class WindowSparseConvEncoder(nn.Module):
         self.spatial_dilations = spatial_dilations
         self.time_dilations = time_dilations
         self.use_anisotropic_dilation = use_anisotropic_dilation
-        self.use_se = bool(use_se)
 
         self.in_conv = spconv.SubMConv3d(
             d_model,
@@ -313,7 +261,7 @@ class WindowSparseConvEncoder(nn.Module):
             spatial_dilations=spatial_dilations if use_anisotropic_dilation else None,
             time_dilations=time_dilations if use_anisotropic_dilation else None,
         )
-        self.se = SparseSE(target_channels, reduction=se_reduction) if self.use_se else None
+        self.se = SparseSE(target_channels, reduction=se_reduction)
         self.out_conv = spconv.SubMConv3d(
             target_channels,
             d_model,
@@ -393,14 +341,12 @@ class WindowSparseConvEncoder(nn.Module):
             self.dropout(self.act(sparse_out.features)),
         )
 
-        if self.gdsc_conv is not None:
-            sparse_out = self.gdsc_conv(sparse_out)
-            sparse_out = self._replace_feature(
-                sparse_out,
-                self.dropout(self.act(sparse_out.features)),
-            )
-            if self.se is not None:
-                sparse_out = self.se(sparse_out)
+        sparse_out = self.gdsc_conv(sparse_out)
+        sparse_out = self._replace_feature(
+            sparse_out,
+            self.dropout(self.act(sparse_out.features)),
+        )
+        sparse_out = self.se(sparse_out)
 
         return self.out_conv(sparse_out)
 
