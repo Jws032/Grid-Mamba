@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rerun SC4 and SC12 for exactly 50 epochs with early stopping disabled."""
+"""Rerun selected sparse-conv ablations for exactly 50 epochs."""
 
 from __future__ import annotations
 
@@ -36,6 +36,16 @@ EXPERIMENTS: Dict[str, Dict[str, Any]] = {
         "name": "sparse_conv_gdsc_v1_1_4_d1_2_3_4_se",
         "voxel_size": [1.0, 1.0, 4.0],
     },
+    "SC12_GS_G4_FINE_LOW_MID": {
+        "name": "sparse_conv_gdsc_v1_1_4_d1_2_3_4_se_gs_g4_fine_low_mid",
+        "group": "grid_spatial_stride",
+        "voxel_size": [1.0, 1.0, 4.0],
+        "scale_strides": [
+            [24.0, 24.0, 100.0],
+            [48.0, 48.0, 200.0],
+            [128.0, 128.0, 400.0],
+        ],
+    },
 }
 
 
@@ -66,7 +76,7 @@ def parse_args() -> argparse.Namespace:
         "--experiment",
         choices=EXPERIMENTS.keys(),
         default=None,
-        help="Run only one experiment. By default, run SC4 then SC12.",
+        help="Run only one experiment. By default, run all registered experiments.",
     )
     return parser.parse_args()
 
@@ -161,6 +171,8 @@ def build_train_config(experiment_id: str, run_dir: Path) -> Dict[str, Any]:
             "sparse_conv_use_se": True,
         }
     )
+    if "scale_strides" in experiment:
+        grid_mamba["scale_strides"] = experiment["scale_strides"]
 
     train_section = config.setdefault("TRAIN", {})
     train_section["epochs"] = 50
@@ -170,7 +182,7 @@ def build_train_config(experiment_id: str, run_dir: Path) -> Dict[str, Any]:
     experiment_section = config.setdefault("EXPERIMENT", {})
     experiment_section["id"] = experiment_id
     experiment_section["name"] = experiment["name"]
-    experiment_section["group"] = "sparse_conv_encoder"
+    experiment_section["group"] = experiment.get("group", "sparse_conv_encoder")
     experiment_section["fixed_epochs"] = 50
     experiment_section["early_stopping"] = False
     experiment_section["source_config"] = rel_path(BASE_CONFIG)
