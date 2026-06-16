@@ -553,6 +553,73 @@ EV_FLYING_EXPERIMENTS = {
             ),
         ),
     },
+    "EF42": {
+        "group": "ev_flying_ef36_sparse_conv_ablation",
+        "name": "EF42",
+        "overrides": base.merge_overrides(
+            base.gm(
+                scale_strides=EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES,
+                use_sparse_conv_encoder=False,
+            ),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF43": {
+        "group": "ev_flying_ef36_temporal_diffusion",
+        "name": "EF43",
+        "overrides": base.merge_overrides(
+            base.gm(
+                scale_strides=EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES,
+                temporal_context_diffusion_alpha_init=0.05,
+                temporal_token_diffusion_alpha_init=0.02,
+                temporal_context_diffusion_gate_bias=-3.0,
+                temporal_token_diffusion_gate_bias=-4.0,
+            ),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF44": {
+        "group": "ev_flying_ef36_regularization",
+        "name": "EF44",
+        "overrides": base.merge_overrides(
+            base.gm(
+                scale_strides=EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES,
+                dropout=0.18,
+                spatial_context_dropout=0.18,
+                sparse_conv_dropout=0.15,
+            ),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF45": {
+        "group": "ev_flying_ef36_loss",
+        "name": "EF45",
+        "overrides": base.merge_overrides(
+            base.gm(scale_strides=EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                loss_pos_weight=1.2,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
     "EFS8": {
         "group": "ev_flying_swc_stride",
         "name": "stride_8",
