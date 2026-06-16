@@ -97,6 +97,24 @@ EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES = [
     [296.0, 236.0, 400.0],
 ]
 
+EV_FLYING_NONUNIFORM_SPATIAL_COMPACT_SCALE_STRIDES = [
+    [84.0, 70.0, 100.0],
+    [150.0, 126.0, 200.0],
+    [256.0, 204.0, 400.0],
+]
+
+EV_FLYING_NONUNIFORM_TIME_FINE_SCALE_STRIDES = [
+    [84.0, 70.0, 100.0],
+    [168.0, 140.0, 180.0],
+    [296.0, 236.0, 360.0],
+]
+
+EV_FLYING_NONUNIFORM_TIME_COARSE_SCALE_STRIDES = [
+    [84.0, 70.0, 100.0],
+    [168.0, 140.0, 240.0],
+    [296.0, 236.0, 480.0],
+]
+
 EV_FLYING_EXTRA_FINER_SCALE_STRIDES = [
     [56.0, 48.0, 100.0],
     [112.0, 96.0, 200.0],
@@ -486,6 +504,47 @@ EV_FLYING_EXPERIMENTS = {
         "name": "EF37",
         "overrides": base.merge_overrides(
             base.gm(scale_strides=EV_FLYING_MEDIUM_SPATIAL_76_SCALE_STRIDES),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF39": {
+        "group": "ev_flying_nonuniform_scale",
+        "name": "EF39",
+        "overrides": base.merge_overrides(
+            base.gm(
+                scale_strides=EV_FLYING_NONUNIFORM_SPATIAL_COMPACT_SCALE_STRIDES
+            ),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF40": {
+        "group": "ev_flying_nonuniform_scale",
+        "name": "EF40",
+        "overrides": base.merge_overrides(
+            base.gm(scale_strides=EV_FLYING_NONUNIFORM_TIME_FINE_SCALE_STRIDES),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF41": {
+        "group": "ev_flying_nonuniform_scale",
+        "name": "EF41",
+        "overrides": base.merge_overrides(
+            base.gm(scale_strides=EV_FLYING_NONUNIFORM_TIME_COARSE_SCALE_STRIDES),
             base.train(
                 optim="Adam",
                 weight_decay=0.0,
