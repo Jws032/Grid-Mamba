@@ -97,6 +97,12 @@ EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES = [
     [296.0, 236.0, 400.0],
 ]
 
+EV_FLYING_SPATIAL84_TIME80_SCALE_STRIDES = [
+    [84.0, 70.0, 80.0],
+    [168.0, 140.0, 160.0],
+    [296.0, 236.0, 320.0],
+]
+
 EV_FLYING_NONUNIFORM_SPATIAL_COMPACT_SCALE_STRIDES = [
     [84.0, 70.0, 100.0],
     [150.0, 126.0, 200.0],
@@ -615,6 +621,77 @@ EV_FLYING_EXPERIMENTS = {
                 optim="Adam",
                 weight_decay=0.0,
                 loss_pos_weight=1.2,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF45_retry": {
+        "group": "ev_flying_ef36_loss",
+        "name": "EF45_retry",
+        "overrides": base.merge_overrides(
+            base.gm(scale_strides=EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                loss_pos_weight=1.2,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF49": {
+        "group": "ev_flying_ef36_loss",
+        "name": "EF49",
+        "overrides": base.merge_overrides(
+            base.gm(scale_strides=EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                loss_pos_weight=0.85,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF50": {
+        "group": "ev_flying_ef36_loss",
+        "name": "EF50",
+        "overrides": base.merge_overrides(
+            base.gm(scale_strides=EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                loss_pos_weight=0.75,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF51": {
+        "group": "ev_flying_ef36_temporal_scale",
+        "name": "EF51",
+        "overrides": base.merge_overrides(
+            base.gm(scale_strides=EV_FLYING_SPATIAL84_TIME80_SCALE_STRIDES),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
+                epochs=50,
+                early_stopping=False,
+            ),
+        ),
+    },
+    "EF52": {
+        "group": "ev_flying_ef36_sparse_regularization",
+        "name": "EF52",
+        "overrides": base.merge_overrides(
+            base.gm(
+                scale_strides=EV_FLYING_MEDIUM_SPATIAL_84_SCALE_STRIDES,
+                sparse_conv_dropout=0.20,
+            ),
+            base.train(
+                optim="Adam",
+                weight_decay=0.0,
                 epochs=50,
                 early_stopping=False,
             ),
