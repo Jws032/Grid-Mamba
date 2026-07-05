@@ -14,7 +14,7 @@ import sys
 import tempfile
 import time
 from types import SimpleNamespace
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Optional
 
 import yaml
 
@@ -30,15 +30,16 @@ CHECKPOINTS = {
     "best_iou": "best_iou_seed37.pt",
     "best_loss": "best_loss_seed37.pt",
 }
+FRED_SCALED_STRIDES = [
+    [80.0, 60.0, 100.0],
+    [180.0, 120.0, 200.0],
+    [480.0, 360.0, 400.0],
+]
 EXPERIMENTS: Dict[str, Dict[str, Any]] = {
     "FRED_SC12_GS_SCALED": {
-        "name": "fred_sc12_gs_80_60_180_120_480_360",
+        "name": "FRED_SC12_GS_SCALED",
         "group": "fred_grid_spatial_stride",
-        "scale_strides": [
-            [80.0, 60.0, 100.0],
-            [180.0, 120.0, 200.0],
-            [480.0, 360.0, 400.0],
-        ],
+        "scale_strides": FRED_SCALED_STRIDES,
         "max_events_num": 500000,
     },
 }
@@ -80,9 +81,38 @@ def parse_args() -> argparse.Namespace:
         help="Replace an existing run directory for train/all/smoke stages.",
     )
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume training from an epoch-level latest_train_state checkpoint.",
+    )
+    parser.add_argument(
+        "--resume-path",
+        type=Path,
+        default=None,
+        help=(
+            "Optional resume checkpoint path. Defaults to "
+            "<run_dir>/latest_train_state_seed37.pt."
+        ),
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help=(
+            "Optional final total epoch target for train/resume. "
+            "For resume, training continues until this epoch count."
+        ),
+    )
+    parser.add_argument(
         "--cuda-visible-devices",
         default=None,
         help="Optional CUDA_VISIBLE_DEVICES value for subprocesses.",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=None,
+        help="Optional FRED_segmentation root override for migrated servers.",
     )
     parser.add_argument(
         "--checkpoints",
@@ -110,6 +140,12 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.smoke:
         args.stage = "smoke"
+    if args.resume and args.overwrite:
+        parser.error("--resume cannot be used together with --overwrite")
+    if args.resume and args.stage not in {"train", "all"}:
+        parser.error("--resume is only valid with --stage train or --stage all")
+    if args.epochs is not None and args.epochs <= 0:
+        parser.error("--epochs must be positive")
     if args.smoke_max_events <= 0:
         parser.error("--smoke-max-events must be positive")
     checkpoint_names = [name.strip() for name in args.checkpoints.split(",") if name.strip()]
@@ -228,6 +264,12 @@ def build_train_config(experiment_id: str, run_dir: Path) -> Dict[str, Any]:
     return config
 
 
+def apply_data_root_override(config: Dict[str, Any], data_root: Optional[Path]) -> None:
+    if data_root is None:
+        return
+    config.setdefault("DATA", {})["root"] = str(data_root)
+
+
 def build_test_config(
     train_config: Mapping[str, Any],
     checkpoint_path: Path,
@@ -260,12 +302,47 @@ def best_iou_row(csv_path: Path) -> Dict[str, float]:
     }
 
 
-def prepare_run_dir(run_dir: Path, overwrite: bool) -> None:
+def prepare_run_dir(run_dir: Path, overwrite: bool, resume: bool = False) -> None:
     if run_dir.exists() and any(run_dir.iterdir()):
+        if resume:
+            return
         if not overwrite:
             raise RuntimeError(f"Output directory exists: {run_dir}")
         shutil.rmtree(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
+
+
+def default_resume_path(run_dir: Path) -> Path:
+    return run_dir / "latest_train_state_seed37.pt"
+
+
+def apply_resume_config(
+    config: Dict[str, Any],
+    *,
+    run_dir: Path,
+    resume: bool,
+    resume_path: Optional[Path],
+) -> None:
+    train_section = config.setdefault("TRAIN", {})
+    train_section["resume"] = bool(resume)
+    if resume:
+        path = resolve_resume_checkpoint(run_dir, resume_path)
+        train_section["resume_path"] = rel_path(path)
+    else:
+        train_section.pop("resume_path", None)
+
+
+def apply_epoch_override(config: Dict[str, Any], epochs: Optional[int]) -> None:
+    if epochs is None:
+        return
+    config.setdefault("TRAIN", {})["epochs"] = int(epochs)
+
+
+def resolve_resume_checkpoint(run_dir: Path, resume_path: Optional[Path]) -> Path:
+    path = resume_path if resume_path is not None else default_resume_path(run_dir)
+    if path.is_absolute():
+        return path
+    return REPO_ROOT / path
 
 
 def run_smoke(args: argparse.Namespace, experiment_id: str, run_dir: Path) -> None:
@@ -279,6 +356,7 @@ def run_smoke(args: argparse.Namespace, experiment_id: str, run_dir: Path) -> No
     smoke_log_path = smoke_dir / "smoke.log"
 
     config = build_train_config(experiment_id, smoke_dir)
+    apply_data_root_override(config, args.data_root)
     config.setdefault("TRAIN", {})["max_events_num"] = int(args.smoke_max_events)
     config["TRAIN"]["train_workers"] = 0
     config["TRAIN"]["fred_random_downsample_train"] = False
@@ -346,9 +424,25 @@ def run_train(
     run_dir: Path,
     env: Mapping[str, str],
 ) -> Dict[str, Any]:
-    prepare_run_dir(run_dir, args.overwrite)
-    train_config = build_train_config(experiment_id, run_dir)
-    write_yaml(run_dir / "train_config.yaml", train_config)
+    prepare_run_dir(run_dir, args.overwrite, resume=args.resume)
+    train_config_path = run_dir / "train_config.yaml"
+    if args.resume and train_config_path.is_file():
+        train_config = load_yaml(train_config_path)
+    else:
+        train_config = build_train_config(experiment_id, run_dir)
+    apply_data_root_override(train_config, args.data_root)
+    apply_epoch_override(train_config, args.epochs)
+    if args.resume:
+        checkpoint_path = resolve_resume_checkpoint(run_dir, args.resume_path)
+        if not checkpoint_path.exists():
+            raise RuntimeError(f"Missing resume checkpoint: {checkpoint_path}")
+    apply_resume_config(
+        train_config,
+        run_dir=run_dir,
+        resume=args.resume,
+        resume_path=args.resume_path,
+    )
+    write_yaml(train_config_path, train_config)
 
     temp_config = runtime_config(train_config, experiment_id)
     try:
@@ -379,6 +473,7 @@ def run_tests(
         train_config = load_yaml(train_config_path)
     else:
         train_config = build_train_config(experiment_id, run_dir)
+        apply_data_root_override(train_config, args.data_root)
         write_yaml(train_config_path, train_config)
 
     checkpoint_results: Dict[str, Any] = {}
