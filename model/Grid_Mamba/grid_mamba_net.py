@@ -68,6 +68,11 @@ class GridMambaNet(nn.Module):
         self.use_spatial_window_context = bool(
             getattr(cfg, "use_spatial_window_context", True)
         )
+        self.spatial_context_detach_interval = int(
+            getattr(cfg, "spatial_context_detach_interval", 0)
+        )
+        if self.spatial_context_detach_interval < 0:
+            raise ValueError("spatial_context_detach_interval must be >= 0")
 
         sensor_size = getattr(cfg, "sensor_size", (260, 346))
         self.sensor_height, self.sensor_width = sensor_size
@@ -389,6 +394,35 @@ class GridMambaNet(nn.Module):
             or level in self.local_mamba_checkpoint_levels
         )
 
+    @staticmethod
+    def _detach_spatial_context_state(state):
+        if torch.is_tensor(state):
+            return state.detach()
+        if isinstance(state, dict):
+            return {
+                key: GridMambaNet._detach_spatial_context_state(value)
+                for key, value in state.items()
+            }
+        if isinstance(state, tuple):
+            return tuple(
+                GridMambaNet._detach_spatial_context_state(value)
+                for value in state
+            )
+        if isinstance(state, list):
+            return [
+                GridMambaNet._detach_spatial_context_state(value)
+                for value in state
+            ]
+        return state
+
+    def _should_detach_spatial_context_state(self, window_index: int) -> bool:
+        return (
+            self.training
+            and torch.is_grad_enabled()
+            and self.spatial_context_detach_interval > 0
+            and (window_index + 1) % self.spatial_context_detach_interval == 0
+        )
+
     def _forward_one_window_features(
         self,
         points: torch.Tensor,
@@ -493,6 +527,109 @@ class GridMambaNet(nn.Module):
     ) -> torch.Tensor:
         fused_feat = self._forward_one_window_features(points, feats)
         return self._classify_features(fused_feat)
+
+    def iter_forward_window_chunks(
+        self,
+        points: torch.Tensor,
+        chunk_size: int,
+        prev_state=None,
+        knn_cache_key=None,
+    ):
+        """
+        Yield point logits by time-window chunks for truncated training backward.
+
+        The caller should run backward on each yielded chunk before requesting
+        the next one. Between chunks, SWC state is detached so forward memory
+        stays continuous while the autograd graph is bounded.
+        """
+        if points.numel() == 0:
+            return
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+
+        use_streaming_ts = self.use_ts_embedding and self.use_streaming_ts_embedding
+        if self.use_ts_embedding and not use_streaming_ts:
+            raise RuntimeError(
+                "iter_forward_window_chunks requires use_ts_embedding=False "
+                "or use_streaming_ts_embedding=True"
+            )
+
+        sort_idx = torch.argsort(points[:, 2])
+        points_sorted = points[sort_idx]
+        t = points_sorted[:, 2]
+        window_ids = torch.div(
+            t - t[0],
+            self.window_size,
+            rounding_mode="floor",
+        ).long()
+
+        _, counts = torch.unique_consecutive(
+            window_ids,
+            return_counts=True,
+        )
+        cum_counts = torch.zeros(
+            counts.numel() + 1,
+            dtype=torch.long,
+            device=points.device,
+        )
+        torch.cumsum(counts, dim=0, out=cum_counts[1:])
+
+        outputs = []
+        output_indices = []
+        ts_state = None
+        spatial_context_state = prev_state
+
+        for i in range(counts.numel()):
+            start = cum_counts[i]
+            end = cum_counts[i + 1]
+
+            win_points = points_sorted[start:end]
+            if use_streaming_ts:
+                win_feats, ts_state = self._encode_streaming_input_features(
+                    win_points,
+                    ts_state,
+                )
+            else:
+                win_feats = self._encode_input_features(win_points)
+
+            win_feats = self._apply_window_local_encoder(
+                win_points,
+                win_feats,
+                knn_cache_key=knn_cache_key,
+                window_id=int(i),
+            )
+
+            if not self.use_spatial_window_context:
+                win_out = self._forward_one_window(win_points, win_feats)
+            else:
+                fused_feat = self._forward_one_window_features(win_points, win_feats)
+                cell_idx = self.spatial_window_context._get_spatial_cell_indices(
+                    win_points
+                )
+                fused_feat, spatial_context_state = self.spatial_window_context.step(
+                    win_points,
+                    fused_feat,
+                    spatial_context_state,
+                    cell_idx=cell_idx,
+                )
+                win_out = self._classify_features(fused_feat)
+
+            outputs.append(win_out)
+            output_indices.append(sort_idx[start:end])
+
+            is_chunk_end = len(outputs) >= chunk_size or i + 1 == counts.numel()
+            if is_chunk_end:
+                yield (
+                    torch.cat(outputs, dim=0),
+                    torch.cat(output_indices, dim=0),
+                    spatial_context_state,
+                )
+                outputs = []
+                output_indices = []
+                if self.training and torch.is_grad_enabled():
+                    spatial_context_state = self._detach_spatial_context_state(
+                        spatial_context_state
+                    )
 
     def forward(self, points: torch.Tensor, prev_state=None, knn_cache_key=None):
         """
@@ -617,6 +754,10 @@ class GridMambaNet(nn.Module):
 
                 # 4d. 分类
                 outputs.append(self._classify_features(fused_feat))
+                if self._should_detach_spatial_context_state(int(i)):
+                    spatial_context_state = self._detach_spatial_context_state(
+                        spatial_context_state
+                    )
 
             out_sorted = torch.cat(outputs, dim=0)
             prev_state = spatial_context_state   # 更新流式状态，供下一批次使用

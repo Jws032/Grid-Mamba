@@ -455,6 +455,8 @@ def build_train_config(
     smoke: bool,
     smoke_epochs: int,
     smoke_max_events: int,
+    smoke_train_batches: int,
+    smoke_val_batches: int,
 ) -> Dict[str, Any]:
     config = load_yaml(base_config)
     run_dir = experiment_dir(output_root, experiment_id, smoke)
@@ -473,6 +475,10 @@ def build_train_config(
         }
         if smoke_max_events > 0:
             smoke_train_overrides["max_events_num"] = int(smoke_max_events)
+        if smoke_train_batches > 0:
+            smoke_train_overrides["train_limit_batches"] = int(smoke_train_batches)
+        if smoke_val_batches > 0:
+            smoke_train_overrides["val_limit_batches"] = int(smoke_val_batches)
         update_config(config, {"TRAIN": smoke_train_overrides})
 
     config.setdefault("EXPERIMENT", {})
@@ -756,6 +762,8 @@ def ensure_train_config(
         smoke=args.smoke,
         smoke_epochs=args.smoke_epochs,
         smoke_max_events=args.smoke_max_events,
+        smoke_train_batches=args.smoke_train_batches,
+        smoke_val_batches=args.smoke_val_batches,
     )
     write_train_config(run_dir, train_config)
     return train_config
@@ -878,6 +886,8 @@ def run_experiment(args: argparse.Namespace, experiment_id: str) -> Dict[str, An
                 smoke=args.smoke,
                 smoke_epochs=args.smoke_epochs,
                 smoke_max_events=args.smoke_max_events,
+                smoke_train_batches=args.smoke_train_batches,
+                smoke_val_batches=args.smoke_val_batches,
             )
             write_train_config(run_dir, train_config)
         else:
@@ -981,6 +991,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Training max_events_num override in smoke mode; use 0 to keep base config.",
     )
     parser.add_argument(
+        "--smoke-train-batches",
+        type=int,
+        default=0,
+        help="Training batch limit in smoke mode; use 0 to run the full epoch.",
+    )
+    parser.add_argument(
+        "--smoke-val-batches",
+        type=int,
+        default=0,
+        help="Validation batch limit in smoke mode; use 0 to run full validation.",
+    )
+    parser.add_argument(
         "--keep-test-roc",
         action="store_true",
         help="Keep TEST.roc from the base config. By default, generated test configs disable it.",
@@ -998,6 +1020,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         parser.error("--smoke-epochs must be positive")
     if args.smoke_max_events < 0:
         parser.error("--smoke-max-events must be non-negative")
+    if args.smoke_train_batches < 0:
+        parser.error("--smoke-train-batches must be non-negative")
+    if args.smoke_val_batches < 0:
+        parser.error("--smoke-val-batches must be non-negative")
     if not args.list and not args.all and args.experiment is None:
         parser.error("Specify --experiment, --all, or --list")
     if args.smoke and args.all:

@@ -1,5 +1,6 @@
 import os
 import shutil
+import itertools
 from configs.configs import cfg
 import torch
 import torch.nn as nn
@@ -56,6 +57,9 @@ def save_train_config_snapshot():
         return
 
     target_path = os.path.join(cfg.model_save_root, "train_config.yaml")
+    if os.path.abspath(config_path) == os.path.abspath(target_path):
+        return
+
     shutil.copy2(config_path, target_path)
 
 
@@ -84,6 +88,18 @@ if __name__ == '__main__':
     empty_cache_every_batch = bool(getattr(cfg, 'empty_cache_every_batch', False))
     num_workers = int(getattr(cfg, 'train_workers', 0))
     train_shuffle = bool(getattr(cfg, 'train_shuffle', True))
+    train_limit_batches = int(getattr(cfg, 'train_limit_batches', 0))
+    val_limit_batches = int(getattr(cfg, 'val_limit_batches', 0))
+    train_window_backward_chunk_size = int(
+        getattr(cfg, 'train_window_backward_chunk_size', 0)
+    )
+    if train_window_backward_chunk_size < 0:
+        raise ValueError("train_window_backward_chunk_size must be >= 0")
+    use_persistent_workers = (
+        num_workers > 0
+        and train_limit_batches <= 0
+        and val_limit_batches <= 0
+    )
     dataloader_generator = torch.Generator()
     dataloader_generator.manual_seed(seed)
 
@@ -100,7 +116,7 @@ if __name__ == '__main__':
         shuffle=train_shuffle,
         num_workers=num_workers,
         pin_memory=True,
-        persistent_workers=num_workers > 0,
+        persistent_workers=use_persistent_workers,
         generator=dataloader_generator,
     )
 
@@ -130,7 +146,7 @@ if __name__ == '__main__':
         collate_fn=val_dataset.custom_collate,
         num_workers=num_workers,
         pin_memory=True,
-        persistent_workers=num_workers > 0,
+        persistent_workers=use_persistent_workers,
     )
     evaluter = evalute(cfg)
     train_loss_fn = nn.BCEWithLogitsLoss(reduction='none')
@@ -145,8 +161,14 @@ if __name__ == '__main__':
         train_loss_total = 0
         train_count = 0
 
+        train_iter = train_dataloader
+        train_total_batches = len(train_dataloader)
+        if train_limit_batches > 0:
+            train_iter = itertools.islice(train_dataloader, train_limit_batches)
+            train_total_batches = min(train_total_batches, train_limit_batches)
+
         pbar = tqdm.tqdm(
-            total=len(train_dataloader),
+            total=train_total_batches,
             unit="Batch",
             unit_scale=True,
             desc=f"Epoch: {epoch}",
@@ -154,37 +176,87 @@ if __name__ == '__main__':
             leave=True
         )
 
-        for batch_idx, ev in enumerate(train_dataloader):
+        for batch_idx, ev in enumerate(train_iter):
             points = ev['points'].float().to(device, non_blocking=True)
             label = ev['seg_label'].float().to(device, non_blocking=True)
             knn_cache_key = get_single_knn_cache_key(ev)
 
-            with torch.autocast(
-                device_type='cuda',
-                dtype=amp_dtype,
-                enabled=use_amp,
-            ):
-                preds, _ = net(points, knn_cache_key=knn_cache_key)
-
-            # ===== NaN 检查 =====
-            if torch.isnan(preds).any() or torch.isinf(preds).any():
-                print(f"Warning: train output contains NaN/Inf at epoch={epoch}, batch={batch_idx}!")
-                continue
-
-            # ===== loss =====
-            element_loss = train_loss_fn(preds.float(), label)
-
-            valid_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
-            if valid_mask.sum() == 0:
-                continue
-
-            loss = element_loss[valid_mask].mean()
-
-            if torch.isnan(loss) or torch.isinf(loss):
-                continue
-
             optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+
+            if train_window_backward_chunk_size > 0:
+                loss_value = 0.0
+                valid_count = 0
+                batch_failed = False
+                chunk_iter = net.iter_forward_window_chunks(
+                    points,
+                    chunk_size=train_window_backward_chunk_size,
+                    knn_cache_key=knn_cache_key,
+                )
+
+                while True:
+                    with torch.autocast(
+                        device_type='cuda',
+                        dtype=amp_dtype,
+                        enabled=use_amp,
+                    ):
+                        try:
+                            preds, pred_indices, _ = next(chunk_iter)
+                        except StopIteration:
+                            break
+
+                    # ===== NaN 检查 =====
+                    if torch.isnan(preds).any() or torch.isinf(preds).any():
+                        print(f"Warning: train output contains NaN/Inf at epoch={epoch}, batch={batch_idx}!")
+                        batch_failed = True
+                        break
+
+                    # ===== loss =====
+                    chunk_label = label[pred_indices]
+                    element_loss = train_loss_fn(preds.float(), chunk_label)
+                    valid_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
+                    chunk_valid_count = int(valid_mask.sum().item())
+                    if chunk_valid_count == 0:
+                        continue
+
+                    loss = element_loss[valid_mask].sum() / max(int(label.numel()), 1)
+                    if torch.isnan(loss) or torch.isinf(loss):
+                        batch_failed = True
+                        break
+
+                    loss.backward()
+                    loss_value += float(loss.detach().item())
+                    valid_count += chunk_valid_count
+
+                if batch_failed or valid_count == 0:
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
+            else:
+                with torch.autocast(
+                    device_type='cuda',
+                    dtype=amp_dtype,
+                    enabled=use_amp,
+                ):
+                    preds, _ = net(points, knn_cache_key=knn_cache_key)
+
+                # ===== NaN 检查 =====
+                if torch.isnan(preds).any() or torch.isinf(preds).any():
+                    print(f"Warning: train output contains NaN/Inf at epoch={epoch}, batch={batch_idx}!")
+                    continue
+
+                # ===== loss =====
+                element_loss = train_loss_fn(preds.float(), label)
+
+                valid_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
+                if valid_mask.sum() == 0:
+                    continue
+
+                loss = element_loss[valid_mask].mean()
+
+                if torch.isnan(loss) or torch.isinf(loss):
+                    continue
+
+                loss.backward()
+                loss_value = loss.item()
 
             torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
 
@@ -203,7 +275,6 @@ if __name__ == '__main__':
 
             optimizer.step()
 
-            loss_value = loss.item()
             train_loss_total += loss_value
             train_count += 1
             train_loss = train_loss_total / train_count
@@ -239,7 +310,11 @@ if __name__ == '__main__':
             val_count = 0
             evaluter.matches = {}  # 清空
 
-            for sample, ev in enumerate(val_dataloader):
+            val_iter = val_dataloader
+            if val_limit_batches > 0:
+                val_iter = itertools.islice(val_dataloader, val_limit_batches)
+
+            for sample, ev in enumerate(val_iter):
                 points = ev['points'].float().to(device, non_blocking=True)
                 label = ev['seg_label'].float().to(device, non_blocking=True)
                 knn_cache_key = get_single_knn_cache_key(ev)
