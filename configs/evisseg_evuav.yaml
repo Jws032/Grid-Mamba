@@ -63,6 +63,7 @@ GRID_MAMBA:
     - [128.0, 128.0, 400.0]
 
   # LocalMambaBlock
+  use_local_mamba: True
   d_state: 16
   d_conv: 4
   expand: 2

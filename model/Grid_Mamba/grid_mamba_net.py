@@ -36,6 +36,7 @@ class GridMambaNet(nn.Module):
         self.num_classes = num_classes
         self.window_size = float(getattr(cfg, "window_size", 400.0))
         self.use_grid_pos_encoding = bool(getattr(cfg, "use_grid_pos_encoding", True))
+        self.use_local_mamba = bool(getattr(cfg, "use_local_mamba", True))
         self.use_local_mamba_checkpoint = bool(
             getattr(cfg, "use_local_mamba_checkpoint", True)
         )
@@ -201,39 +202,47 @@ class GridMambaNet(nn.Module):
                 "use_knn_spatial_encoder and use_sparse_conv_encoder cannot both be True"
             )
 
-        local_mamba_kwargs = dict(
-            d_model=embed_dim,
-            d_state=getattr(cfg, "d_state", 16),
-            d_conv=getattr(cfg, "d_conv", 4),
-            expand=getattr(cfg, "expand", 2),
-            dropout=getattr(cfg, "dropout", 0.1),
-            max_seq_len=getattr(cfg, "max_seq_len", 1024),
-            small_bucket_bs=getattr(cfg, "small_bucket_bs", 128),
-            mid_bucket_bs=getattr(cfg, "mid_bucket_bs", 64),
-            large_bucket_bs=getattr(cfg, "large_bucket_bs", 16),
-        )
-
-        self.local_mamba_levels = nn.ModuleList([
-            LocalMambaBlock(**local_mamba_kwargs)
-            for level in range(len(self.scale_strides))
-        ])
-
-        # 轻量 grid-relative position encoding：让每个尺度的 Mamba 知道点在当前 3D grid 内的位置。
-        pos_hidden_dim = max(embed_dim // 2, 16)
-        self.grid_pos_encoders = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(3, pos_hidden_dim),
-                nn.ReLU(inplace=True),
-                nn.Linear(pos_hidden_dim, embed_dim),
+        if self.use_local_mamba:
+            local_mamba_kwargs = dict(
+                d_model=embed_dim,
+                d_state=getattr(cfg, "d_state", 16),
+                d_conv=getattr(cfg, "d_conv", 4),
+                expand=getattr(cfg, "expand", 2),
+                dropout=getattr(cfg, "dropout", 0.1),
+                max_seq_len=getattr(cfg, "max_seq_len", 1024),
+                small_bucket_bs=getattr(cfg, "small_bucket_bs", 128),
+                mid_bucket_bs=getattr(cfg, "mid_bucket_bs", 64),
+                large_bucket_bs=getattr(cfg, "large_bucket_bs", 16),
             )
-            for _ in self.scale_strides
-        ])
-        # 让新增分支初始时近似不改变原 baseline，训练中再逐步学习位置增量。
-        for encoder in self.grid_pos_encoders:
-            nn.init.zeros_(encoder[-1].weight)
-            nn.init.zeros_(encoder[-1].bias)
 
-        fused_dim = len(self.scale_strides) * embed_dim
+            self.local_mamba_levels = nn.ModuleList([
+                LocalMambaBlock(**local_mamba_kwargs)
+                for _ in self.scale_strides
+            ])
+
+            # 轻量 grid-relative position encoding：让每个尺度的 Mamba 知道点在当前 3D grid 内的位置。
+            pos_hidden_dim = max(embed_dim // 2, 16)
+            self.grid_pos_encoders = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(3, pos_hidden_dim),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(pos_hidden_dim, embed_dim),
+                )
+                for _ in self.scale_strides
+            ])
+            # 让新增分支初始时近似不改变原 baseline，训练中再逐步学习位置增量。
+            for encoder in self.grid_pos_encoders:
+                nn.init.zeros_(encoder[-1].weight)
+                nn.init.zeros_(encoder[-1].bias)
+        else:
+            self.local_mamba_levels = nn.ModuleList()
+            self.grid_pos_encoders = nn.ModuleList()
+
+        fused_dim = (
+            len(self.scale_strides) * embed_dim
+            if self.use_local_mamba
+            else embed_dim
+        )
 
         if self.use_spatial_window_context:
             self.spatial_window_context = SpatialWindowContext(
@@ -431,6 +440,9 @@ class GridMambaNet(nn.Module):
         """
         单个 window 内的多尺度局部建模，只返回 fused point feature，不做分类。
         """
+        if not self.use_local_mamba:
+            return feats
+
         scale_feats = []
         num_window_points = int(points.size(0))
 
