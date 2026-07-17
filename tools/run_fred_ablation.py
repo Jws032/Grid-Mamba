@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run FRED GridMamba ablations with smoke, train, and test stages."""
+"""Run FRED GridMamba ablations with smoke, train, test, and runtime stages."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage",
-        choices=("all", "train", "test", "smoke"),
+        choices=("all", "train", "test", "smoke", "runtime"),
         default="all",
         help="'all' trains then tests checkpoints; 'smoke' runs one batch only.",
     )
@@ -137,6 +137,12 @@ def parse_args() -> argparse.Namespace:
         default=500000,
         help="max_events_num override used by smoke.",
     )
+    parser.add_argument(
+        "--limit-test",
+        type=int,
+        default=None,
+        help="Optional number of test samples for runtime/debug runs.",
+    )
     args = parser.parse_args()
     if args.smoke:
         args.stage = "smoke"
@@ -148,6 +154,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--epochs must be positive")
     if args.smoke_max_events <= 0:
         parser.error("--smoke-max-events must be positive")
+    if args.limit_test is not None and args.limit_test <= 0:
+        parser.error("--limit-test must be positive")
     checkpoint_names = [name.strip() for name in args.checkpoints.split(",") if name.strip()]
     unknown = [name for name in checkpoint_names if name not in CHECKPOINTS]
     if unknown:
@@ -538,6 +546,69 @@ def run_tests(
     return summary
 
 
+def run_runtime(
+    args: argparse.Namespace,
+    experiment_id: str,
+    run_dir: Path,
+    env: Mapping[str, str],
+) -> Dict[str, Any]:
+    train_config_path = run_dir / "train_config.yaml"
+    if train_config_path.is_file():
+        train_config = load_yaml(train_config_path)
+    else:
+        train_config = build_train_config(experiment_id, run_dir)
+        apply_data_root_override(train_config, args.data_root)
+        write_yaml(train_config_path, train_config)
+
+    checkpoint_results: Dict[str, Any] = {}
+    for checkpoint_name in args.checkpoints:
+        checkpoint_path = run_dir / CHECKPOINTS[checkpoint_name]
+        if not checkpoint_path.exists():
+            raise RuntimeError(f"Missing checkpoint: {checkpoint_path}")
+
+        runtime_dir = run_dir / f"runtime_{checkpoint_name}"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        runtime_json = runtime_dir / "runtime_summary.json"
+        test_config = build_test_config(
+            train_config,
+            checkpoint_path,
+            runtime_dir / "predictions.txt",
+        )
+        test_config_path = runtime_dir / "runtime_config.yaml"
+        write_yaml(test_config_path, test_config)
+
+        command = [
+            args.python_bin,
+            str(REPO_ROOT / "test_grid_mamba_cetus_style.py"),
+            "--config",
+            str(test_config_path),
+            "--runtime-only",
+            "--runtime-json",
+            str(runtime_json),
+        ]
+        if args.limit_test is not None:
+            command += ["--limit-test", str(args.limit_test)]
+
+        run_logged(
+            command,
+            REPO_ROOT,
+            runtime_dir / "runtime.log",
+            env,
+        )
+
+        with runtime_json.open("r", encoding="utf-8") as f:
+            checkpoint_results[checkpoint_name] = json.load(f)
+
+    summary = {
+        "experiment": experiment_id,
+        "name": train_config.get("EXPERIMENT", {}).get("name", experiment_id),
+        "group": train_config.get("EXPERIMENT", {}).get("group", "fred"),
+        "checkpoint_results": checkpoint_results,
+    }
+    write_json(run_dir / "runtime_summary.json", summary)
+    return summary
+
+
 def main() -> int:
     args = parse_args()
     args.output_root = args.output_root.resolve()
@@ -561,6 +632,11 @@ def main() -> int:
         print(f"[{args.experiment}] test -> {run_dir}", flush=True)
         summary = run_tests(args, args.experiment, run_dir, env)
         print(json.dumps(summary["final_metrics"], ensure_ascii=False), flush=True)
+
+    if args.stage == "runtime":
+        print(f"[{args.experiment}] runtime -> {run_dir}", flush=True)
+        summary = run_runtime(args, args.experiment, run_dir, env)
+        print(json.dumps(summary["checkpoint_results"], ensure_ascii=False), flush=True)
 
     print(f"Done: {run_dir}", flush=True)
     return 0
