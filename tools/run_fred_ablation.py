@@ -595,9 +595,14 @@ def run_runtime(
             runtime_dir / "runtime.log",
             env,
         )
-
         with runtime_json.open("r", encoding="utf-8") as f:
-            checkpoint_results[checkpoint_name] = json.load(f)
+            runtime_payload = json.load(f)
+        checkpoint_results[checkpoint_name] = {
+            "checkpoint_path": rel_path(checkpoint_path),
+            "output_dir": rel_path(runtime_dir),
+            "runtime_json": rel_path(runtime_json),
+            **runtime_payload,
+        }
 
     summary = {
         "experiment": experiment_id,

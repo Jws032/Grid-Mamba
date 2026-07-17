@@ -2,6 +2,7 @@ import os
 import json
 import sys
 from configs.configs import cfg
+import json
 import torch
 import torch.nn as nn
 import numpy as np
@@ -189,8 +190,12 @@ if __name__ == '__main__':
 
     # 添加输出文件路径
     output_path = getattr(cfg, 'output_path', 'predictions.txt')
+    prediction_threshold = float(getattr(cfg, 'prediction_threshold', 0.9))
     output_dir = Path(output_path).parent
     output_dir.mkdir(parents=True, exist_ok=True)
+    runtime_only = bool(getattr(cfg, 'runtime_only', False))
+    limit_test = getattr(cfg, 'limit_test', None)
+    runtime_json_path, runtime_sample_path = runtime_output_paths(output_dir)
 
     pbar = tqdm.tqdm(
         total=len(test_dataloader),
@@ -201,19 +206,25 @@ if __name__ == '__main__':
         leave=True
     )
 
-    evaluter = evalute(cfg)
+    evaluter = None if runtime_only else evalute(cfg)
 
     # 打开输出文件
     total_points = 0
     successful_batches = 0
+    runtime_rows = []
+    f_out = None if runtime_only else open(output_path, 'w')
+    try:
+        if f_out is not None:
+            # 写入表头（参考 inference.py 格式）
+            f_out.write("file_idx point_idx x y t gt pred prob file_name\n")
 
-    with open(output_path, 'w') as f_out:
-        # 写入表头（参考 inference.py 格式）
-        f_out.write("file_idx point_idx x y t gt pred prob\n")
-
+        cuda_synchronize()
+        runtime_start = time.perf_counter()
         for sample, ev in enumerate(test_dataloader):
-            torch.cuda.synchronize()
-            start_time = time.time()
+            if limit_test is not None and sample >= int(limit_test):
+                break
+            cuda_synchronize()
+            sample_start = time.perf_counter()
             
             with torch.no_grad():
                 # 直接使用points字段，已经是归一化的[x, y, t]格式
@@ -227,16 +238,11 @@ if __name__ == '__main__':
                 
                 # 计算概率和二值预测
                 probs = torch.sigmoid(preds.reshape(-1)).cpu()  # 概率值 [N]
-                pred_binary = (probs >= 0.9).long()  # 预测标签(0或1) [N]
+                pred_binary = (probs >= prediction_threshold).long()
                 
                 point_count = preds.shape[0]  # 点数量
-                
-                # 记录结束时间
-                torch.cuda.synchronize()
-                end_time = time.time()
-                duration = end_time - start_time  # 测试时长（秒）
-                
-                if cfg.eval:
+
+                if cfg.eval and evaluter is not None:
                     evaluter.matches[str(sample)] = {}
                     evaluter.matches[str(sample)]['seg_pred'] = preds.cpu()
                     evaluter.matches[str(sample)]['seg_gt'] = label.cpu()
@@ -250,30 +256,45 @@ if __name__ == '__main__':
                         except IndexError as e:
                             print(f"Warning: IndexError in roc_update for sample {sample}: {e}")
                             # 跳过ROC计算，但继续其他评估
-                
-                # 保存结果到文件（参考 inference.py）
-                try:
-                    # 获取原始坐标（points已经是[x, y, t]格式）
-                    valid_points = points.cpu().numpy()
-                    valid_labels = label.cpu().numpy()
-                    valid_probs = probs.cpu().numpy()
-                    valid_preds = pred_binary.cpu().numpy()
-                    
-                    for point_idx, (point, gt, pred, prob) in enumerate(zip(
-                        valid_points, valid_labels, valid_preds, valid_probs
-                    )):
-                        x, y, t = point[0], point[1], point[2]
-                        f_out.write(f"{sample} {point_idx} {x:.6f} {y:.6f} {t:.6f} "
-                                    f"{int(gt)} {int(pred)} {prob:.6f}\n")
-                    
-                    total_points += len(valid_points)
-                    successful_batches += 1
-                except Exception as e:
-                    print(f"Error saving batch {sample}: {e}")
-                    continue
+                file_name = ev['file_name'][0]
+                if f_out is not None:
+                    try:
+                        # 获取原始坐标（points已经是[x, y, t]格式）
+                        valid_points = points.cpu().numpy()
+                        valid_labels = label.cpu().numpy()
+                        valid_probs = probs.cpu().numpy()
+                        valid_preds = pred_binary.cpu().numpy()
+
+                        for point_idx, (point, gt, pred, prob) in enumerate(zip(
+                            valid_points, valid_labels, valid_preds, valid_probs
+                        )):
+                            x, y, t = point[0], point[1], point[2]
+                            f_out.write(f"{sample} {point_idx} {x:.6f} {y:.6f} {t:.6f} "
+                                        f"{int(gt)} {int(pred)} {prob:.6f} {file_name}\n")
+                    except Exception as e:
+                        print(f"Error saving batch {sample}: {e}")
+                        continue
+
+                cuda_synchronize()
+                duration = time.perf_counter() - sample_start
+                runtime_rows.append({
+                    "file_idx": int(sample),
+                    "file_name": str(file_name),
+                    "points": int(point_count),
+                    "seconds": float(duration),
+                })
+                total_points += int(point_count)
+                successful_batches += 1
 
             pbar.update(1)
-            torch.cuda.empty_cache()
+            if not runtime_only:
+                torch.cuda.empty_cache()
+
+        cuda_synchronize()
+        total_runtime_sec = time.perf_counter() - runtime_start
+    finally:
+        if f_out is not None:
+            f_out.close()
 
     pbar.close()
 
@@ -281,8 +302,17 @@ if __name__ == '__main__':
     print("\n=== 测试统计信息 ===")
     print(f"总样本数: {successful_batches}")
     print(f"总点数: {total_points}")
+    if runtime_only:
+        write_runtime_outputs(
+            runtime_json_path,
+            runtime_sample_path,
+            runtime_rows,
+            total_runtime_sec,
+            total_points,
+            cfg.model_path,
+        )
 
-    if cfg.eval:
+    if cfg.eval and evaluter is not None:
         iou = evaluter.evaluate_semantic_segmantation_miou()
         seg_acc = evaluter.evaluate_semantic_segmantation_accuracy()
         pd, fa = None, None

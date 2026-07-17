@@ -10,7 +10,11 @@ class EvUAV(BaseDataLoader):
 
         self.mode = mode
         self.root = os.path.join(self.root,mode)
-        self.file_list = os.listdir(self.root)
+        self.file_list = sorted(
+            file_name
+            for file_name in os.listdir(self.root)
+            if file_name.endswith('.npz')
+        )
 
     def __getitem__(self, sample_idx):
         file_name = self.file_list[sample_idx]

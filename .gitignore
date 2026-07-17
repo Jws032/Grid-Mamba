@@ -11,6 +11,10 @@ analysis_outputs/
 visualization/
 .idea/
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 configs/__pycache__/
 dataset/__pycache__/
 model/__pycache__/
