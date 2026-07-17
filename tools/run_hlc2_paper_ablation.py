@@ -40,7 +40,7 @@ RUNTIME_PROFILER = REPO_ROOT / "tools" / "profile_evuav_runtime.py"
 
 SEED = 37
 FULL_LOGICAL_ID = "MC06"
-RUNTIME_GROUPS = {"LS", "CS"}
+RUNTIME_GROUPS = {"LS"}
 RUNTIME_EXPECTED_SAMPLES = 24
 RUNTIME_EXPECTED_EVENTS = 2_074_586
 
@@ -541,14 +541,14 @@ def selected_logical_ids(args: argparse.Namespace) -> List[str]:
     else:
         ids = [args.experiment]
 
-    if args.stage == "runtime":
+    if args.stage in {"runtime", "runtime_prepare"}:
         ids = [
             experiment_id
             for experiment_id in ids
             if LOGICAL_EXPERIMENTS[experiment_id]["group"] in RUNTIME_GROUPS
         ]
         if not ids:
-            raise ValueError("Runtime is registered only for the LS and CS groups")
+            raise ValueError("Runtime is registered only for the LS group")
     return ids
 
 
@@ -605,11 +605,44 @@ def build_runtime_artifact(
             "precision": "fp32",
             "warmup": 1,
             "repeats": 3,
+            "max_samples": 0,
         },
     }
     artifact_path = runtime_dir / "runtime_artifact.yaml"
     core.write_yaml(artifact_path, artifact)
     return artifact_path
+
+
+def prepare_runtime(
+    args: argparse.Namespace,
+    canonical_id: str,
+) -> Dict[str, Any]:
+    run_dir = canonical_dir(args.output_root, canonical_id, smoke=False)
+    output_dir = args.output_root / "runtime" / canonical_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = build_runtime_artifact(canonical_id, run_dir, output_dir)
+    _, _, accuracy_summary = final_checkpoint_for_run(run_dir)
+    print(f"[{canonical_id}] runtime prepared: {artifact_path}")
+    return {
+        "experiment": canonical_id,
+        "name": (
+            "full_hlc2"
+            if canonical_id == FULL_LOGICAL_ID
+            else CANONICAL_EXPERIMENTS[canonical_id]["name"]
+        ),
+        "group": (
+            "MC"
+            if canonical_id == FULL_LOGICAL_ID
+            else CANONICAL_EXPERIMENTS[canonical_id]["group"]
+        ),
+        "status": "ok",
+        "stage": "runtime_prepare",
+        "output_dir": relative_to_repo(output_dir),
+        "runtime_artifact": relative_to_repo(artifact_path),
+        "final_checkpoint": accuracy_summary.get("final_checkpoint"),
+        "final_metrics": accuracy_summary.get("final_metrics"),
+        "completed_at": core.now_string(),
+    }
 
 
 def run_runtime(
@@ -623,12 +656,41 @@ def run_runtime(
     run_dir = canonical_dir(args.output_root, canonical_id, smoke=False)
     runtime_dir = args.output_root / "runtime" / canonical_id
     summary_path = runtime_dir / "runtime_summary.json"
-    if runtime_dir.exists() and any(runtime_dir.iterdir()):
-        if not args.overwrite:
-            raise RuntimeError(
-                f"Runtime output already exists: {runtime_dir}. Use --overwrite to replace it."
-            )
+    if summary_path.is_file() and not args.overwrite:
+        print(f"[{canonical_id}] reusing completed runtime output: {summary_path}")
+        runtime_summary = load_json(summary_path)
+        return {
+            "experiment": canonical_id,
+            "name": (
+                "full_hlc2"
+                if canonical_id == FULL_LOGICAL_ID
+                else CANONICAL_EXPERIMENTS[canonical_id]["name"]
+            ),
+            "group": (
+                "MC"
+                if canonical_id == FULL_LOGICAL_ID
+                else CANONICAL_EXPERIMENTS[canonical_id]["group"]
+            ),
+            "status": "ok",
+            "stage": "runtime",
+            "output_dir": relative_to_repo(runtime_dir),
+            "runtime": runtime_summary,
+            "reused_existing": True,
+            "completed_at": core.now_string(),
+        }
+    if args.overwrite and runtime_dir.exists():
         shutil.rmtree(runtime_dir)
+    elif runtime_dir.exists():
+        partial = [
+            path
+            for path in runtime_dir.iterdir()
+            if path.name != "runtime_artifact.yaml"
+        ]
+        if partial:
+            raise RuntimeError(
+                f"Partial runtime output exists: {runtime_dir}. "
+                "Use --overwrite to replace it."
+            )
     runtime_dir.mkdir(parents=True, exist_ok=True)
     artifact_path = build_runtime_artifact(canonical_id, run_dir, runtime_dir)
     command = [
@@ -808,14 +870,19 @@ def write_formal_outputs(
         "failed": failed,
         "results": results,
     }
-    summary_path = args.output_root / "hlc2_run_summary.json"
+    if args.stage in {"runtime_prepare", "runtime"}:
+        summary_stem = f"hlc2_{args.stage}_summary"
+        group_dir = args.output_root / f"{args.stage}_group_summaries"
+    else:
+        summary_stem = "hlc2_run_summary"
+        group_dir = args.output_root / "group_summaries"
+    summary_path = args.output_root / f"{summary_stem}.json"
     core.write_json(summary_path, summary)
-    write_csv_summary(args.output_root / "hlc2_run_summary.csv", results)
+    write_csv_summary(args.output_root / f"{summary_stem}.csv", results)
 
     groups = {LOGICAL_EXPERIMENTS[logical_id]["group"] for logical_id in logical_ids}
     for group in sorted(groups):
         group_results = [result for result in results if result["group"] == group]
-        group_dir = args.output_root / "group_summaries"
         core.write_json(
             group_dir / f"{group}.json",
             {
@@ -859,9 +926,21 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--list", action="store_true", help="List all 23 logical rows and exit.")
     parser.add_argument(
         "--stage",
-        choices=["config", "train", "test", "eval", "summarize", "runtime", "all"],
+        choices=[
+            "config",
+            "train",
+            "test",
+            "eval",
+            "summarize",
+            "runtime_prepare",
+            "runtime",
+            "all",
+        ],
         default="all",
-        help="'all' runs the accuracy pipeline only; runtime is always separate.",
+        help=(
+            "'all' runs the accuracy pipeline only; runtime_prepare validates and "
+            "writes manifests without profiling; runtime is always separate."
+        ),
     )
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
@@ -878,8 +957,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
     if not args.list and not args.all and args.group is None and args.experiment is None:
         parser.error("Specify --experiment, --group, --all, or --list")
-    if args.smoke and args.stage == "runtime":
-        parser.error("Runtime is a full-split protocol and cannot be combined with --smoke")
+    if args.smoke and args.stage in {"runtime", "runtime_prepare"}:
+        parser.error("Runtime stages are full-split protocols and cannot use --smoke")
     if args.smoke_epochs <= 0:
         parser.error("--smoke-epochs must be positive")
     if min(args.smoke_max_events, args.smoke_train_batches, args.smoke_val_batches) < 0:
@@ -911,6 +990,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             if args.stage == "runtime":
                 result = run_runtime(args, canonical_id)
+            elif args.stage == "runtime_prepare":
+                result = prepare_runtime(args, canonical_id)
             elif canonical_id == FULL_LOGICAL_ID:
                 result = external_success_record(args.stage)
             else:

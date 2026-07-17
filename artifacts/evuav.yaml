@@ -1,0 +1,51 @@
+format_version: 1
+model: Grid_Mamba
+experiment: SC12_GS_G4_FINE_LOW_MID
+dataset:
+  name: EVUAV
+  split: test
+  samples: 24
+  events: 2074586
+environment:
+  conda: grid_mamba
+checkpoint:
+  id: best_loss
+  path: save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/best_loss_seed37.pt
+  size_bytes: 7469754
+  sha256: d4141bcf8368c4eee64554890c0d1d503ed86b02505b927a0846a16e19d32f49
+  selection: User-confirmed EVUAV Grid_Mamba runtime checkpoint; summary final_checkpoint is best_loss.
+evaluation:
+  summary: save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/summary.json
+  eval_csv: save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/test_best_loss/point_level_eval.csv
+  threshold: 0.41000000000000003
+  Pd: 0.9517522022965595
+  Fa: 0.004543223992383235
+  IoU: 0.9044892877872125
+  Acc: 0.9447291889015559
+runtime:
+  protocol_id: evuav_runtime_v1
+  unit: ms_per_complete_sample
+  output_dir: analysis_outputs/evuav_runtime_v1/grid_mamba
+  summary: analysis_outputs/evuav_runtime_v1/grid_mamba/runtime_summary.json
+  summary_sha256: a8b592b015034c7e21f983d4a4d5b1b070ceefc255e43c5f19ac59a273e88b43
+  per_sample: analysis_outputs/evuav_runtime_v1/grid_mamba/runtime_per_sample.csv
+  per_sample_sha256: 22184edbd2e6f7acb8059bde5898ab693795400a2f1c399bf208d31853252124
+  summary_csv: analysis_outputs/evuav_runtime_v1/grid_mamba/runtime_summary.csv
+  summary_csv_sha256: c92942a251ccea156797f4aaa28b4b7b6b09432c0601fc93cc6fd0e3f99a6583
+  runtime_ms: 190.14491680233428
+  mean_raw_ms: 190.20469969190242
+  p50_ms: 172.1965023316443
+  p90_ms: 314.8874725215136
+  p95_ms: 363.12321657314897
+  std_ms: 70.29012594690282
+  min_ms: 90.71868844330311
+  max_ms: 372.42297548800707
+  events_per_second: 454606.3328276791
+  repeat_cv_percent: 0.03918020037537672
+  peak_cuda_memory_mb: 1305.72607421875
+  params: 1858037
+  precision: fp32
+  torch_version: "2.2.0"
+  cuda_version: "11.8"
+  driver_version: 570.133.07
+  gpu_name: NVIDIA GeForce RTX 4090 D
