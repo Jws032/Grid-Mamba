@@ -10,6 +10,7 @@ class evalute():
     def __init__(self, cfg):
         self.matches = {}
         self.data = pd.DataFrame()
+        self.sensor_width, self.sensor_height = getattr(cfg, "res", [346, 260])
 
         if cfg.roc:
             self.pd_detT = cfg.pd_detT
@@ -33,7 +34,10 @@ class evalute():
                 ev_locs_xyz[t_range]
             preds_frame_ori = preds_frame.clone()
             idx_list_frame = set(idx_frame)
-            false_mask = np.zeros((260, 346), dtype=np.uint8)
+            false_mask = np.zeros(
+                (int(self.sensor_height), int(self.sensor_width)),
+                dtype=np.uint8,
+            )
             preds_frame[preds_frame_ori >= thresh] = 1
             preds_frame[preds_frame_ori < thresh] = 0
 
@@ -57,7 +61,9 @@ class evalute():
 
     def cal_roc(self):
         pd = self.correct_num / self.obj_num
-        fa = self.false_num / (self.frame_num * 346 * 260)
+        fa = self.false_num / (
+            self.frame_num * int(self.sensor_width) * int(self.sensor_height)
+        )
         return pd, fa
 
     def evaluate_semantic_segmantation_miou(self, thresh=0.9):

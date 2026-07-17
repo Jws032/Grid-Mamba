@@ -1,10 +1,13 @@
 import os
+import json
+import sys
 from configs.configs import cfg
 import torch
 import torch.nn as nn
 import numpy as np
 from dataset.ev_uav import EvUAV
 from dataset.ev_flying import EvFlying
+from dataset.fred_segmentation import FredSegmentation
 import random
 from model.Grid_Mamba.grid_mamba_net import GridMambaNet
 import mlflow
@@ -40,6 +43,8 @@ def build_dataset(cfg, mode):
         return EvUAV(cfg, mode=mode)
     if dataset_name == "ev_flying":
         return EvFlying(cfg, mode=mode)
+    if dataset_name == "fred_segmentation":
+        return FredSegmentation(cfg, mode=mode)
     raise ValueError(f"Unsupported dataset_name: {dataset_name}")
 
 
@@ -48,6 +53,18 @@ def get_single_knn_cache_key(batch):
     if isinstance(keys, (list, tuple)) and len(keys) == 1:
         return keys[0]
     return None
+
+
+def get_single_value(batch, key):
+    values = batch.get(key)
+    if isinstance(values, (list, tuple)) and len(values) == 1:
+        return values[0]
+    return values
+
+
+def cuda_synchronize_if_available():
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
 
 if __name__ == '__main__':
@@ -68,6 +85,107 @@ if __name__ == '__main__':
     # 加载模型
     net.load_state_dict(torch.load(cfg.model_path))
     print('dict load: ', cfg.model_path)
+
+    runtime_only = bool(getattr(cfg, "runtime_only", False))
+    limit_test = getattr(cfg, "limit_test", None)
+    if limit_test is not None:
+        limit_test = int(limit_test)
+        if limit_test <= 0:
+            raise ValueError("--limit-test must be positive")
+
+    if runtime_only:
+        runtime_json = getattr(cfg, "runtime_json", None)
+        if runtime_json is None:
+            output_path = getattr(cfg, 'output_path', 'predictions.txt')
+            runtime_json = str(Path(output_path).parent / "runtime_summary.json")
+        runtime_json = Path(runtime_json)
+        runtime_json.parent.mkdir(parents=True, exist_ok=True)
+        per_sample_path = runtime_json.with_name("runtime_per_sample.jsonl")
+
+        max_samples = len(test_dataloader)
+        if limit_test is not None:
+            max_samples = min(max_samples, limit_test)
+
+        pbar = tqdm.tqdm(
+            total=max_samples,
+            unit="sample",
+            desc="Runtime",
+            position=0,
+            leave=True,
+        )
+
+        total_points = 0
+        successful_batches = 0
+        iterator = iter(test_dataloader)
+        per_sample_records = []
+
+        cuda_synchronize_if_available()
+        total_start = time.perf_counter()
+        with per_sample_path.open("w", encoding="utf-8") as f_runtime:
+            for sample in range(max_samples):
+                cuda_synchronize_if_available()
+                sample_start = time.perf_counter()
+                ev = next(iterator)
+
+                with torch.no_grad():
+                    points = ev['points'].float().cuda()
+                    knn_cache_key = get_single_knn_cache_key(ev)
+                    preds, _ = net(points, knn_cache_key=knn_cache_key)
+                    probs = torch.sigmoid(preds.reshape(-1))
+                    pred_binary = probs >= 0.9
+                    positive_points = int(pred_binary.sum().detach().cpu())
+                    prob_mean = float(probs.mean().detach().cpu())
+                    prob_max = float(probs.max().detach().cpu())
+                    point_count = int(preds.shape[0])
+
+                cuda_synchronize_if_available()
+                sample_seconds = time.perf_counter() - sample_start
+
+                total_points += point_count
+                successful_batches += 1
+                record = {
+                    "file_idx": sample,
+                    "file_name": get_single_value(ev, "file_name"),
+                    "points": point_count,
+                    "seconds": sample_seconds,
+                    "points_per_sec": point_count / sample_seconds if sample_seconds > 0 else None,
+                    "positive_points": positive_points,
+                    "prob_mean": prob_mean,
+                    "prob_max": prob_max,
+                }
+                per_sample_records.append(record)
+                f_runtime.write(json.dumps(record, ensure_ascii=False) + "\n")
+                f_runtime.flush()
+                pbar.update(1)
+                torch.cuda.empty_cache()
+
+        cuda_synchronize_if_available()
+        total_inference_sec = time.perf_counter() - total_start
+        pbar.close()
+
+        summary = {
+            "model": "GridMamba",
+            "dataset": "FRED_segmentation",
+            "split": "test",
+            "num_samples": successful_batches,
+            "num_points": total_points,
+            "total_inference_sec": total_inference_sec,
+            "runtime_sec_per_sample": (
+                total_inference_sec / successful_batches if successful_batches else None
+            ),
+            "points_per_sec": total_points / total_inference_sec if total_inference_sec > 0 else None,
+            "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
+            "device": device,
+            "checkpoint": str(cfg.model_path),
+            "config": getattr(cfg, "config", None),
+            "runtime_per_sample": str(per_sample_path),
+            "limit_test": limit_test,
+        }
+        with runtime_json.open("w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+        sys.exit(0)
 
     # 添加输出文件路径
     output_path = getattr(cfg, 'output_path', 'predictions.txt')

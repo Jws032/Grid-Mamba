@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 from dataset.ev_uav import EvUAV
 from dataset.ev_flying import EvFlying
+from dataset.fred_segmentation import FredSegmentation
 
 import random
 from model.Grid_Mamba.grid_mamba_net import GridMambaNet
@@ -69,6 +70,8 @@ def build_dataset(mode):
         return EvUAV(cfg, mode=mode)
     if dataset_name == "ev_flying":
         return EvFlying(cfg, mode=mode)
+    if dataset_name == "fred_segmentation":
+        return FredSegmentation(cfg, mode=mode)
     raise ValueError(f"Unsupported dataset_name: {dataset_name}")
 
 
@@ -77,6 +80,115 @@ def get_single_knn_cache_key(batch):
     if isinstance(keys, (list, tuple)) and len(keys) == 1:
         return keys[0]
     return None
+
+
+def latest_train_state_path(seed):
+    return os.path.join(cfg.model_save_root, f"latest_train_state_seed{seed}.pt")
+
+
+def configured_resume_path(seed):
+    path = str(getattr(cfg, "resume_path", "") or "").strip()
+    if not path:
+        path = latest_train_state_path(seed)
+    return os.path.expanduser(path)
+
+
+def save_train_state(
+    path,
+    *,
+    epoch,
+    net,
+    optimizer,
+    scheduler,
+    best_loss,
+    best_iou,
+    best_val_loss,
+    no_improve_epoch,
+    dataloader_generator,
+    train_loss,
+    val_loss,
+    val_iou,
+    seed,
+):
+    state = {
+        "epoch": int(epoch),
+        "seed": int(seed),
+        "model_state_dict": net.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict(),
+        "best_loss": float(best_loss),
+        "best_iou": float(best_iou),
+        "best_val_loss": float(best_val_loss),
+        "no_improve_epoch": int(no_improve_epoch),
+        "train_loss": float(train_loss),
+        "val_loss": float(val_loss),
+        "val_iou": float(val_iou),
+        "python_random_state": random.getstate(),
+        "numpy_random_state": np.random.get_state(),
+        "torch_random_state": torch.get_rng_state(),
+        "dataloader_generator_state": dataloader_generator.get_state(),
+        "cfg_epochs": int(cfg.epochs),
+    }
+    if torch.cuda.is_available():
+        state["cuda_random_state_all"] = torch.cuda.get_rng_state_all()
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = path + ".tmp"
+    torch.save(state, tmp_path)
+    os.replace(tmp_path, path)
+
+
+def load_train_state(
+    path,
+    *,
+    net,
+    optimizer,
+    scheduler,
+    dataloader_generator,
+    device,
+):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"resume checkpoint not found: {path}")
+
+    state = torch.load(path, map_location=device)
+    required = {
+        "epoch",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "scheduler_state_dict",
+    }
+    missing = sorted(required - set(state.keys()))
+    if missing:
+        raise ValueError(
+            f"resume checkpoint is missing {missing}; "
+            "expected an epoch-level training state, not a model-only checkpoint."
+        )
+
+    net.load_state_dict(state["model_state_dict"])
+    optimizer.load_state_dict(state["optimizer_state_dict"])
+    scheduler.load_state_dict(state["scheduler_state_dict"])
+
+    if "python_random_state" in state:
+        random.setstate(state["python_random_state"])
+    if "numpy_random_state" in state:
+        np.random.set_state(state["numpy_random_state"])
+    if "torch_random_state" in state:
+        torch.set_rng_state(state["torch_random_state"].cpu())
+    if "cuda_random_state_all" in state and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(
+            [rng_state.cpu() for rng_state in state["cuda_random_state_all"]]
+        )
+    if "dataloader_generator_state" in state:
+        dataloader_generator.set_state(state["dataloader_generator_state"].cpu())
+
+    start_epoch = int(state["epoch"]) + 1
+    return {
+        "start_epoch": start_epoch,
+        "best_loss": float(state.get("best_loss", 1e5)),
+        "best_iou": float(state.get("best_iou", 0)),
+        "best_val_loss": float(state.get("best_val_loss", 1e5)),
+        "no_improve_epoch": int(state.get("no_improve_epoch", 0)),
+    }
 
 
 if __name__ == '__main__':
@@ -137,6 +249,30 @@ if __name__ == '__main__':
     best_val_loss = 1e5
     patience = int(getattr(cfg, 'early_stopping_patience', 20))
     no_improve_epoch = 0
+    start_epoch = 0
+
+    resume_enabled = bool(getattr(cfg, 'resume', False))
+    if resume_enabled:
+        resume_path = configured_resume_path(seed)
+        resume_state = load_train_state(
+            resume_path,
+            net=net,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            dataloader_generator=dataloader_generator,
+            device=device,
+        )
+        start_epoch = resume_state["start_epoch"]
+        best_loss = resume_state["best_loss"]
+        best_iou = resume_state["best_iou"]
+        best_val_loss = resume_state["best_val_loss"]
+        no_improve_epoch = resume_state["no_improve_epoch"]
+        print(
+            f"Resumed training from {resume_path}: "
+            f"next_epoch={start_epoch}, best_loss={best_loss:.6f}, "
+            f"best_iou={best_iou:.6f}, best_val_loss={best_val_loss:.6f}, "
+            f"no_improve_epoch={no_improve_epoch}"
+        )
 
     # ===== val =====
     val_dataset = build_dataset(mode='val')
@@ -156,7 +292,13 @@ if __name__ == '__main__':
     mlflow.set_experiment('train')
     mlflow.start_run(run_name='train')
 
-    for epoch in range(cfg.epochs):
+    if start_epoch >= cfg.epochs:
+        print(
+            f"Resume checkpoint already reached epoch {start_epoch - 1}; "
+            f"cfg.epochs={cfg.epochs}. No training epochs remain."
+        )
+
+    for epoch in range(start_epoch, cfg.epochs):
         net.train()
         train_loss_total = 0
         train_count = 0
@@ -369,6 +511,7 @@ if __name__ == '__main__':
                 best_iou = iou.item()
 
             # ===== early stopping =====
+            should_stop = False
             if use_early_stopping:
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -378,4 +521,24 @@ if __name__ == '__main__':
 
                 if no_improve_epoch >= patience:
                     print(f"\nEarly stopping triggered at epoch {epoch}")
-                    break
+                    should_stop = True
+
+            save_train_state(
+                latest_train_state_path(seed),
+                epoch=epoch,
+                net=net,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                best_loss=best_loss,
+                best_iou=best_iou,
+                best_val_loss=best_val_loss,
+                no_improve_epoch=no_improve_epoch,
+                dataloader_generator=dataloader_generator,
+                train_loss=train_loss,
+                val_loss=val_loss,
+                val_iou=iou.item(),
+                seed=seed,
+            )
+
+            if should_stop:
+                break

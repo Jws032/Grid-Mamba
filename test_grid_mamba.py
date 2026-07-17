@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 from dataset.ev_uav import EvUAV
+from dataset.ev_flying import EvFlying
+from dataset.fred_segmentation import FredSegmentation
 import random
 from model.Grid_Mamba.grid_mamba_net import GridMambaNet
 import mlflow
@@ -39,6 +41,17 @@ def get_single_knn_cache_key(batch):
     return None
 
 
+def build_dataset(cfg, mode):
+    dataset_name = str(getattr(cfg, "dataset_name", "ev_uav")).lower()
+    if dataset_name == "ev_uav":
+        return EvUAV(cfg, mode=mode)
+    if dataset_name == "ev_flying":
+        return EvFlying(cfg, mode=mode)
+    if dataset_name == "fred_segmentation":
+        return FredSegmentation(cfg, mode=mode)
+    raise ValueError(f"Unsupported dataset_name: {dataset_name}")
+
+
 if __name__ == '__main__':
     seed = 37
     setup(seed)
@@ -47,7 +60,7 @@ if __name__ == '__main__':
     net = GridMambaNet(cfg).eval()
     net.cuda()
 
-    dataset = EvUAV(cfg, mode='test')
+    dataset = build_dataset(cfg, mode='test')
     test_dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=1,
