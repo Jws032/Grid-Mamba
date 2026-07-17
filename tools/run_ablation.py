@@ -1026,8 +1026,6 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         parser.error("--smoke-val-batches must be non-negative")
     if not args.list and not args.all and args.experiment is None:
         parser.error("Specify --experiment, --all, or --list")
-    if args.smoke and args.all:
-        parser.error("--smoke can only be used with --experiment")
     args.run_started_at = now_string()
     return args
 

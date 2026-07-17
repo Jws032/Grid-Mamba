@@ -191,6 +191,82 @@ def load_train_state(
     }
 
 
+def build_optimizer(net):
+    optim_name = str(getattr(cfg, "optim", "Adam")).lower()
+    lr = float(cfg.lr)
+    weight_decay = float(getattr(cfg, "weight_decay", 0.0))
+    params = filter(lambda p: p.requires_grad, net.parameters())
+
+    if optim_name == "adam":
+        optimizer = optim.Adam(params, lr=lr, weight_decay=weight_decay)
+    elif optim_name == "adamw":
+        optimizer = optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+    elif optim_name == "sgd":
+        momentum = float(getattr(cfg, "momentum", 0.9))
+        optimizer = optim.SGD(
+            params,
+            lr=lr,
+            momentum=momentum,
+            weight_decay=weight_decay,
+        )
+    else:
+        raise ValueError(
+            f"Unsupported optimizer: {getattr(cfg, 'optim', None)}. "
+            "Expected Adam, AdamW, or SGD."
+        )
+
+    print(
+        f"optimizer: {optimizer.__class__.__name__}, "
+        f"lr={lr}, weight_decay={weight_decay}"
+    )
+    return optimizer
+
+
+def build_bce_loss(device):
+    loss_pos_weight = getattr(cfg, "loss_pos_weight", None)
+    if loss_pos_weight is None:
+        print("loss: BCEWithLogitsLoss")
+        return nn.BCEWithLogitsLoss(reduction='none')
+
+    loss_pos_weight = float(loss_pos_weight)
+    if loss_pos_weight <= 0:
+        raise ValueError("loss_pos_weight must be positive when set")
+
+    pos_weight = torch.tensor([loss_pos_weight], device=device, dtype=torch.float32)
+    print(f"loss: BCEWithLogitsLoss, pos_weight={loss_pos_weight}")
+    return nn.BCEWithLogitsLoss(reduction='none', pos_weight=pos_weight)
+
+
+def compute_loss(preds, label, loss_fn):
+    element_loss = loss_fn(preds.float(), label)
+
+    valid_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
+    if valid_mask.sum() == 0:
+        return None
+
+    loss = element_loss[valid_mask].mean()
+    if torch.isnan(loss) or torch.isinf(loss):
+        return None
+    return loss
+
+
+def build_scheduler(optimizer):
+    scheduler_t_max = int(getattr(cfg, "scheduler_t_max", 100))
+    scheduler_eta_min = float(getattr(cfg, "scheduler_eta_min", 1e-6))
+    if scheduler_t_max <= 0:
+        raise ValueError("scheduler_t_max must be positive")
+
+    print(
+        f"scheduler: CosineAnnealingLR, "
+        f"T_max={scheduler_t_max}, eta_min={scheduler_eta_min}"
+    )
+    return torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=scheduler_t_max,
+        eta_min=scheduler_eta_min,
+    )
+
+
 if __name__ == '__main__':
     seed = 37
     setup(seed)
@@ -232,14 +308,9 @@ if __name__ == '__main__':
         generator=dataloader_generator,
     )
 
-    optimizer = optim.Adam(
-        filter(lambda p: p.requires_grad, net.parameters()),
-        lr=cfg.lr
-    )
+    optimizer = build_optimizer(net)
     
-    # 替换掉原来的 StepLR
-    # T_max 设为总 Epoch 数，eta_min 设为最小学习率 (建议 1e-6)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100, eta_min=1e-6)
+    scheduler = build_scheduler(optimizer)
 
     best_loss = 1e5
     best_iou = 0
@@ -285,8 +356,7 @@ if __name__ == '__main__':
         persistent_workers=use_persistent_workers,
     )
     evaluter = evalute(cfg)
-    train_loss_fn = nn.BCEWithLogitsLoss(reduction='none')
-    val_loss_fn = nn.BCEWithLogitsLoss(reduction='mean')
+    loss_fn = build_bce_loss(device)
 
     # mlflow
     mlflow.set_experiment('train')
@@ -354,7 +424,7 @@ if __name__ == '__main__':
 
                     # ===== loss =====
                     chunk_label = label[pred_indices]
-                    element_loss = train_loss_fn(preds.float(), chunk_label)
+                    element_loss = loss_fn(preds.float(), chunk_label)
                     valid_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
                     chunk_valid_count = int(valid_mask.sum().item())
                     if chunk_valid_count == 0:
@@ -386,15 +456,8 @@ if __name__ == '__main__':
                     continue
 
                 # ===== loss =====
-                element_loss = train_loss_fn(preds.float(), label)
-
-                valid_mask = ~torch.isnan(element_loss) & ~torch.isinf(element_loss)
-                if valid_mask.sum() == 0:
-                    continue
-
-                loss = element_loss[valid_mask].mean()
-
-                if torch.isnan(loss) or torch.isinf(loss):
+                loss = compute_loss(preds, label, loss_fn)
+                if loss is None:
                     continue
 
                 loss.backward()
@@ -475,8 +538,8 @@ if __name__ == '__main__':
                     continue
 
                 # ===== val loss =====
-                loss = val_loss_fn(preds.float(), label)
-                if torch.isnan(loss) or torch.isinf(loss):
+                loss = compute_loss(preds, label, loss_fn)
+                if loss is None:
                     print(f"Warning: val loss is NaN/Inf at epoch={epoch}, sample={sample}!")
                     continue
                 val_loss_total += loss.item()
