@@ -30,7 +30,7 @@ FULL_RUN_DIR = (
     REPO_ROOT
     / "save_model"
     / "grid_mamba"
-    / "ablation_sparse_conv"
+    / "ablation_sparse_conv_fixed50"
     / "SC12_GS_G4_FINE_LOW_MID"
 )
 FULL_CONFIG = FULL_RUN_DIR / "train_config.yaml"
