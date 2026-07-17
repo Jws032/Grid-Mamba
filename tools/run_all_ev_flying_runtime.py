@@ -47,6 +47,12 @@ JOBS: Dict[str, Dict[str, Any]] = {
         "script": "tools/profile_ev_flying_runtime.py",
         "output": WORKSPACE / "PointTransformerV1/outputs/runtime_ev_flying_v1/pointtransformer_v1",
     },
+    "ev_spsegnet": {
+        "cwd": WORKSPACE / "EV-SpSegNet",
+        "python": "/home/zikun/anaconda3/envs/evuav/bin/python",
+        "script": "tools/profile_ev_flying_runtime.py",
+        "output": WORKSPACE / "EV-SpSegNet/outputs/runtime_ev_flying_v1/ev_spsegnet",
+    },
     "cetus_original_seed42": {
         "cwd": WORKSPACE / "cetus",
         "python": "/home/zikun/anaconda3/envs/cetus/bin/python",
