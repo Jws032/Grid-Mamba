@@ -20,6 +20,7 @@ dataset/__pycache__/
 model/__pycache__/
 utils/__pycache__/
 lib/hais_ops/build/
+lib/hais_ops/HAIS_OP*.so
 model/Grid_Mamba/__pycache__
 whl/
 
