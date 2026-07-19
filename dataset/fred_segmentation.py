@@ -33,6 +33,18 @@ class FredSegmentation(BaseDataLoader):
         self.random_downsample_train = bool(
             getattr(configs, "fred_random_downsample_train", True)
         )
+        self.epoch = 0
+
+    @property
+    def requires_epoch_update(self):
+        return self.mode == "train" and self.random_downsample_train
+
+    def set_epoch(self, epoch):
+        """Select a reproducible, different training subset for each epoch."""
+        epoch = int(epoch)
+        if epoch < 0:
+            raise ValueError("epoch must be non-negative")
+        self.epoch = epoch
 
     @staticmethod
     def _parse_modes(value):
@@ -75,7 +87,10 @@ class FredSegmentation(BaseDataLoader):
             return None
 
         if self.mode == "train" and self.random_downsample_train:
-            indices = np.random.choice(num_events, self.max_events_num, replace=False)
+            rng = np.random.default_rng(
+                self.downsample_seed + self.epoch * len(self.records) + sample_idx
+            )
+            indices = rng.choice(num_events, self.max_events_num, replace=False)
         else:
             mode_offset = {"train": 0, "val": 1_000_000, "test": 2_000_000}.get(
                 self.mode,

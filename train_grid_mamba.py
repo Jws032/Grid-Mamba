@@ -16,6 +16,7 @@ import torch.optim as optim
 import mlflow
 import tqdm
 from utils.eval import evalute
+from utils.streaming_forward import stream_predict_full_sample
 
 
 def setup(seed):
@@ -250,6 +251,27 @@ def compute_loss(preds, label, loss_fn):
     return loss
 
 
+def compute_cpu_validation_loss(preds, label):
+    loss_pos_weight = getattr(cfg, "loss_pos_weight", None)
+    pos_weight = None
+    if loss_pos_weight is not None:
+        pos_weight = torch.tensor(
+            [float(loss_pos_weight)],
+            dtype=torch.float32,
+            device=preds.device,
+        )
+    element_loss = nn.functional.binary_cross_entropy_with_logits(
+        preds.float(),
+        label.float(),
+        reduction="none",
+        pos_weight=pos_weight,
+    )
+    valid_mask = torch.isfinite(element_loss)
+    if not bool(valid_mask.any()):
+        return None
+    return element_loss[valid_mask].mean()
+
+
 def build_scheduler(optimizer):
     scheduler_t_max = int(getattr(cfg, "scheduler_t_max", 100))
     scheduler_eta_min = float(getattr(cfg, "scheduler_eta_min", 1e-6))
@@ -297,6 +319,9 @@ if __name__ == '__main__':
     net = GridMambaNet(cfg).train().to(device)
 
     dataset = build_dataset(mode='train')
+    train_persistent_workers = use_persistent_workers and not bool(
+        getattr(dataset, "requires_epoch_update", False)
+    )
     train_dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=1,
@@ -304,7 +329,7 @@ if __name__ == '__main__':
         shuffle=train_shuffle,
         num_workers=num_workers,
         pin_memory=True,
-        persistent_workers=use_persistent_workers,
+        persistent_workers=train_persistent_workers,
         generator=dataloader_generator,
     )
 
@@ -369,6 +394,8 @@ if __name__ == '__main__':
         )
 
     for epoch in range(start_epoch, cfg.epochs):
+        if hasattr(dataset, "set_epoch"):
+            dataset.set_epoch(epoch)
         net.train()
         train_loss_total = 0
         train_count = 0
@@ -508,6 +535,12 @@ if __name__ == '__main__':
         # =========================
         # ===== 验证（每个epoch）=====
         # =========================
+        # Release gradient tensors and unused training allocator blocks before
+        # full-sample validation. This only changes memory management; model
+        # parameters and optimizer state are preserved.
+        optimizer.zero_grad(set_to_none=True)
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
         net.eval()
 
         with torch.no_grad():
@@ -520,25 +553,40 @@ if __name__ == '__main__':
                 val_iter = itertools.islice(val_dataloader, val_limit_batches)
 
             for sample, ev in enumerate(val_iter):
-                points = ev['points'].float().to(device, non_blocking=True)
-                label = ev['seg_label'].float().to(device, non_blocking=True)
+                points_cpu = ev['points'].float()
+                label_cpu = ev['seg_label'].float()
                 knn_cache_key = get_single_knn_cache_key(ev)
 
-                with torch.autocast(
-                    device_type='cuda',
-                    dtype=amp_dtype,
-                    enabled=use_amp,
-                ):
-                    preds, _ = net(points, knn_cache_key=knn_cache_key)
+                if bool(getattr(cfg, "validation_streaming", False)):
+                    preds_cpu = stream_predict_full_sample(
+                        net,
+                        points_cpu,
+                        device=device,
+                        window_size=float(cfg.window_size),
+                        amp_enabled=use_amp,
+                        amp_dtype=amp_dtype,
+                        knn_cache_key=knn_cache_key,
+                    )
+                    loss = compute_cpu_validation_loss(preds_cpu, label_cpu)
+                else:
+                    points = points_cpu.to(device, non_blocking=True)
+                    label = label_cpu.to(device, non_blocking=True)
+                    with torch.autocast(
+                        device_type='cuda',
+                        dtype=amp_dtype,
+                        enabled=use_amp,
+                    ):
+                        preds, _ = net(points, knn_cache_key=knn_cache_key)
+                    preds_cpu = preds.float().cpu()
+                    loss = compute_loss(preds, label, loss_fn)
 
-                if preds.shape[0] != label.shape[0]:
+                if preds_cpu.shape[0] != label_cpu.shape[0]:
                     continue
-                if torch.isnan(preds).any() or torch.isinf(preds).any():
+                if not bool(torch.isfinite(preds_cpu).all()):
                     print(f"Warning: val output contains NaN/Inf at epoch={epoch}, sample={sample}!")
                     continue
 
                 # ===== val loss =====
-                loss = compute_loss(preds, label, loss_fn)
                 if loss is None:
                     print(f"Warning: val loss is NaN/Inf at epoch={epoch}, sample={sample}!")
                     continue
@@ -547,8 +595,8 @@ if __name__ == '__main__':
 
                 # ===== eval =====
                 evaluter.matches[str(sample)] = {}
-                evaluter.matches[str(sample)]['seg_pred'] = preds.float().cpu()
-                evaluter.matches[str(sample)]['seg_gt'] = label.cpu()
+                evaluter.matches[str(sample)]['seg_pred'] = preds_cpu
+                evaluter.matches[str(sample)]['seg_gt'] = label_cpu
 
             if val_count > 0:
                 val_loss = val_loss_total / val_count

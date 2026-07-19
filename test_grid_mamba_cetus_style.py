@@ -14,6 +14,7 @@ from model.Grid_Mamba.grid_mamba_net import GridMambaNet
 import mlflow
 import tqdm
 from utils.eval import evalute
+from utils.streaming_forward import stream_predict_full_sample
 import time
 from pathlib import Path
 
@@ -68,10 +69,57 @@ def cuda_synchronize_if_available():
         torch.cuda.synchronize()
 
 
+def get_amp_dtype():
+    amp_dtype = str(getattr(cfg, "amp_dtype", "bf16")).lower()
+    if amp_dtype in {"bf16", "bfloat16"}:
+        return torch.bfloat16
+    if amp_dtype in {"fp16", "float16"}:
+        return torch.float16
+    raise ValueError("amp_dtype must be 'bf16' or 'fp16'")
+
+
+def runtime_output_paths(output_dir):
+    return (
+        output_dir / "runtime_summary.json",
+        output_dir / "runtime_per_sample.jsonl",
+    )
+
+
+def write_runtime_outputs(
+    summary_path,
+    sample_path,
+    rows,
+    total_seconds,
+    total_points,
+    model_path,
+):
+    with sample_path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    summary = {
+        "model": "GridMamba",
+        "dataset": str(getattr(cfg, "dataset_name", "unknown")),
+        "split": "test",
+        "num_samples": len(rows),
+        "num_points": int(total_points),
+        "total_inference_sec": float(total_seconds),
+        "runtime_sec_per_sample": total_seconds / len(rows) if rows else None,
+        "points_per_sec": total_points / total_seconds if total_seconds > 0 else None,
+        "checkpoint": str(model_path),
+        "config": getattr(cfg, "config", None),
+        "runtime_per_sample": str(sample_path),
+    }
+    with summary_path.open("w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
 if __name__ == '__main__':
     seed = 37
     setup(seed)
-    device = "cuda:0"
+    device = torch.device("cuda:0")
+    use_amp = bool(getattr(cfg, "use_amp", False))
+    amp_dtype = get_amp_dtype()
 
     net = GridMambaNet(cfg).eval()
     net.cuda()
@@ -129,9 +177,17 @@ if __name__ == '__main__':
                 ev = next(iterator)
 
                 with torch.no_grad():
-                    points = ev['points'].float().cuda()
+                    points = ev['points'].float()
                     knn_cache_key = get_single_knn_cache_key(ev)
-                    preds, _ = net(points, knn_cache_key=knn_cache_key)
+                    preds = stream_predict_full_sample(
+                        net,
+                        points,
+                        device=device,
+                        window_size=float(cfg.window_size),
+                        amp_enabled=use_amp,
+                        amp_dtype=amp_dtype,
+                        knn_cache_key=knn_cache_key,
+                    )
                     probs = torch.sigmoid(preds.reshape(-1))
                     pred_binary = probs >= 0.9
                     positive_points = int(pred_binary.sum().detach().cpu())
@@ -176,7 +232,7 @@ if __name__ == '__main__':
             ),
             "points_per_sec": total_points / total_inference_sec if total_inference_sec > 0 else None,
             "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
-            "device": device,
+            "device": str(device),
             "checkpoint": str(cfg.model_path),
             "config": getattr(cfg, "config", None),
             "runtime_per_sample": str(per_sample_path),
@@ -218,23 +274,31 @@ if __name__ == '__main__':
             # 写入表头（参考 inference.py 格式）
             f_out.write("file_idx point_idx x y t gt pred prob file_name\n")
 
-        cuda_synchronize()
+        cuda_synchronize_if_available()
         runtime_start = time.perf_counter()
         for sample, ev in enumerate(test_dataloader):
             if limit_test is not None and sample >= int(limit_test):
                 break
-            cuda_synchronize()
+            cuda_synchronize_if_available()
             sample_start = time.perf_counter()
             
             with torch.no_grad():
-                # 直接使用points字段，已经是归一化的[x, y, t]格式
-                points = ev['points'].float().cuda()  # [N, 3]
-                label = ev['seg_label'].float().cuda()
+                points = ev['points'].float()
+                label = ev['seg_label'].float()
                 idx = ev['idx_label']
                 knn_cache_key = get_single_knn_cache_key(ev)
 
-                # GridMambaNet 前向传播
-                preds, _ = net(points, knn_cache_key=knn_cache_key)  # preds: [N, 1]
+                # 完整样本留在CPU；每个完整400ms逻辑窗口只执行一次模型前向，
+                # 并在相邻逻辑窗口之间保持SWC状态。
+                preds = stream_predict_full_sample(
+                    net,
+                    points,
+                    device=device,
+                    window_size=float(cfg.window_size),
+                    amp_enabled=use_amp,
+                    amp_dtype=amp_dtype,
+                    knn_cache_key=knn_cache_key,
+                )
                 
                 # 计算概率和二值预测
                 probs = torch.sigmoid(preds.reshape(-1)).cpu()  # 概率值 [N]
@@ -244,15 +308,15 @@ if __name__ == '__main__':
 
                 if cfg.eval and evaluter is not None:
                     evaluter.matches[str(sample)] = {}
-                    evaluter.matches[str(sample)]['seg_pred'] = preds.cpu()
-                    evaluter.matches[str(sample)]['seg_gt'] = label.cpu()
+                    evaluter.matches[str(sample)]['seg_pred'] = preds
+                    evaluter.matches[str(sample)]['seg_gt'] = label
                     if cfg.roc:
                         # 注意：GridMambaNet没有直接提供时间戳，需要从points中提取
-                        ts = points[:, 2].cpu()  # 提取时间戳
-                        ev_locs = points.cpu()   # 使用points作为位置信息
+                        ts = points[:, 2]
+                        ev_locs = points
                         # 确保所有张量都在CPU上，并处理坐标边界问题
                         try:
-                            evaluter.roc_update(ts, preds.cpu(), idx, label.cpu(), ev_locs)
+                            evaluter.roc_update(ts, preds, idx, label, ev_locs)
                         except IndexError as e:
                             print(f"Warning: IndexError in roc_update for sample {sample}: {e}")
                             # 跳过ROC计算，但继续其他评估
@@ -260,10 +324,10 @@ if __name__ == '__main__':
                 if f_out is not None:
                     try:
                         # 获取原始坐标（points已经是[x, y, t]格式）
-                        valid_points = points.cpu().numpy()
-                        valid_labels = label.cpu().numpy()
-                        valid_probs = probs.cpu().numpy()
-                        valid_preds = pred_binary.cpu().numpy()
+                        valid_points = points.numpy()
+                        valid_labels = label.numpy()
+                        valid_probs = probs.numpy()
+                        valid_preds = pred_binary.numpy()
 
                         for point_idx, (point, gt, pred, prob) in enumerate(zip(
                             valid_points, valid_labels, valid_preds, valid_probs
@@ -275,7 +339,7 @@ if __name__ == '__main__':
                         print(f"Error saving batch {sample}: {e}")
                         continue
 
-                cuda_synchronize()
+                cuda_synchronize_if_available()
                 duration = time.perf_counter() - sample_start
                 runtime_rows.append({
                     "file_idx": int(sample),
@@ -290,7 +354,7 @@ if __name__ == '__main__':
             if not runtime_only:
                 torch.cuda.empty_cache()
 
-        cuda_synchronize()
+        cuda_synchronize_if_available()
         total_runtime_sec = time.perf_counter() - runtime_start
     finally:
         if f_out is not None:

@@ -540,6 +540,62 @@ class GridMambaNet(nn.Module):
         fused_feat = self._forward_one_window_features(points, feats)
         return self._classify_features(fused_feat)
 
+    def forward_stream_window(
+        self,
+        points: torch.Tensor,
+        prev_state=None,
+        knn_cache_key=None,
+        window_id=0,
+    ):
+        """Run one pre-segmented logical time window.
+
+        ``points`` contains every event in one logical ``window_size`` interval.
+        The returned spatial state must be passed to the next window of the same
+        sample. This entry point avoids materializing full-sample embeddings on
+        the GPU during validation and inference.
+        """
+        if points.numel() == 0:
+            return points.new_empty((0,)), prev_state
+        if self.use_ts_embedding and self.use_streaming_ts_embedding:
+            raise RuntimeError(
+                "forward_stream_window does not yet support streaming TS embedding"
+            )
+
+        sort_idx = torch.argsort(points[:, 2])
+        points_sorted = points[sort_idx]
+        feats_sorted = self._encode_input_features(points_sorted)
+        feats_sorted = self._apply_window_local_encoder(
+            points_sorted,
+            feats_sorted,
+            knn_cache_key=knn_cache_key,
+            window_id=int(window_id),
+        )
+
+        if not self.use_spatial_window_context:
+            out_sorted = self._forward_one_window(points_sorted, feats_sorted)
+        else:
+            fused_feat = self._forward_one_window_features(
+                points_sorted,
+                feats_sorted,
+            )
+            cell_idx = self.spatial_window_context._get_spatial_cell_indices(
+                points_sorted
+            )
+            fused_feat, prev_state = self.spatial_window_context.step(
+                points_sorted,
+                fused_feat,
+                prev_state,
+                cell_idx=cell_idx,
+            )
+            out_sorted = self._classify_features(fused_feat)
+
+        reverse_idx = torch.empty_like(sort_idx)
+        reverse_idx[sort_idx] = torch.arange(
+            points.size(0),
+            device=points.device,
+        )
+        return out_sorted[reverse_idx], prev_state
+
     def iter_forward_window_chunks(
         self,
         points: torch.Tensor,
@@ -594,7 +650,6 @@ class GridMambaNet(nn.Module):
         for i in range(counts.numel()):
             start = cum_counts[i]
             end = cum_counts[i + 1]
-
             win_points = points_sorted[start:end]
             if use_streaming_ts:
                 win_feats, ts_state = self._encode_streaming_input_features(
