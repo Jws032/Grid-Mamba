@@ -15,61 +15,70 @@ from typing import Any, Dict, List
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = REPO_ROOT.parent
 DEFAULT_OUTPUT = REPO_ROOT / "analysis_outputs" / "ev_flying_runtime_v1"
+CONDA_ENVS_ROOT = Path(
+    os.environ.get("CONDA_ENVS_ROOT", "/home/jzw/miniconda3/envs")
+)
+
+
+def env_python(variable: str, env_name: str) -> str:
+    return os.environ.get(
+        variable, str(CONDA_ENVS_ROOT / env_name / "bin" / "python")
+    )
 
 JOBS: Dict[str, Dict[str, Any]] = {
     "rvt": {
         "cwd": WORKSPACE / "RVT",
-        "python": "/home/zikun/anaconda3/envs/rvt_ev/bin/python",
+        "python": env_python("RVT_PYTHON", "rvt_ev"),
         "script": "tools/profile_ev_flying_runtime.py",
         "output": WORKSPACE / "RVT/outputs/runtime_ev_flying_v1/rvt",
     },
     "sast": {
         "cwd": WORKSPACE / "SAST",
-        "python": "/home/zikun/anaconda3/envs/rvt_ev/bin/python",
+        "python": env_python("SAST_PYTHON", "rvt_ev"),
         "script": "tools/profile_ev_flying_runtime.py",
         "output": WORKSPACE / "SAST/outputs/runtime_ev_flying_v1/sast",
     },
     "randlanet": {
         "cwd": WORKSPACE / "RandLA-Net",
-        "python": "/home/zikun/anaconda3/envs/randla_ev_cu121/bin/python",
+        "python": env_python("RANDLANET_PYTHON", "randla_ev"),
         "script": "tools/profile_ev_flying_runtime.py",
         "output": WORKSPACE / "RandLA-Net/outputs/runtime_ev_flying_v1/randlanet",
     },
     "kpconv": {
         "cwd": WORKSPACE / "KPConv",
-        "python": "/home/zikun/anaconda3/envs/randla_ev_cu121/bin/python",
+        "python": env_python("KPCONV_PYTHON", "randla_ev"),
         "script": "tools/profile_ev_flying_runtime.py",
         "output": WORKSPACE / "KPConv/outputs/runtime_ev_flying_v1/kpconv",
     },
     "pointtransformer_v1": {
         "cwd": WORKSPACE / "PointTransformerV1",
-        "python": "/home/zikun/anaconda3/envs/ptv1_ev/bin/python",
+        "python": env_python("POINTTRANSFORMER_V1_PYTHON", "ptv1_ev"),
         "script": "tools/profile_ev_flying_runtime.py",
         "output": WORKSPACE / "PointTransformerV1/outputs/runtime_ev_flying_v1/pointtransformer_v1",
     },
     "ev_spsegnet": {
-        "cwd": WORKSPACE / "EV-SpSegNet",
-        "python": "/home/zikun/anaconda3/envs/evuav/bin/python",
+        "cwd": WORKSPACE / "EV-UAV",
+        "python": env_python("EV_SPSEGNET_PYTHON", "grid_mamba"),
         "script": "tools/profile_ev_flying_runtime.py",
         "output": WORKSPACE / "EV-SpSegNet/outputs/runtime_ev_flying_v1/ev_spsegnet",
     },
     "cetus_original_seed42": {
-        "cwd": WORKSPACE / "cetus",
-        "python": "/home/zikun/anaconda3/envs/cetus/bin/python",
+        "cwd": WORKSPACE / "CETUS",
+        "python": env_python("CETUS_PYTHON", "grid_mamba"),
         "script": "scripts/profile_ev_flying_runtime.py",
         "extra": ["--checkpoint-id", "original_seed42"],
         "output": WORKSPACE / "cetus/outputs/runtime_ev_flying_v1/original_seed42",
     },
     "cetus_rewritten_seed37": {
-        "cwd": WORKSPACE / "cetus",
-        "python": "/home/zikun/anaconda3/envs/cetus/bin/python",
+        "cwd": WORKSPACE / "CETUS",
+        "python": env_python("CETUS_PYTHON", "grid_mamba"),
         "script": "scripts/profile_ev_flying_runtime.py",
         "extra": ["--checkpoint-id", "rewritten_seed37"],
         "output": WORKSPACE / "cetus/outputs/runtime_ev_flying_v1/rewritten_seed37",
     },
     "grid_mamba": {
         "cwd": REPO_ROOT,
-        "python": "/home/zikun/anaconda3/envs/grid_mamba/bin/python",
+        "python": env_python("GRID_MAMBA_PYTHON", "grid_mamba"),
         "script": "tools/profile_ev_flying_runtime.py",
         "output": DEFAULT_OUTPUT / "grid_mamba",
     },
@@ -85,7 +94,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT))
     parser.add_argument(
         "--models",
-        default=",".join(JOBS),
+        default=",".join(
+            job_id for job_id, job in JOBS.items() if Path(job["cwd"]).is_dir()
+        ),
         help="Comma-separated job ids; default runs all jobs in protocol order.",
     )
     parser.add_argument("--skip-gpu-idle-check", action="store_true")

@@ -17,6 +17,7 @@ import copy
 import csv
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -35,7 +36,7 @@ FULL_RUN_DIR = (
 )
 FULL_CONFIG = FULL_RUN_DIR / "train_config.yaml"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "save_model" / "grid_mamba" / "hlc2_paper_ablation"
-DEFAULT_PYTHON = "/home/zikun/anaconda3/envs/grid_mamba/bin/python"
+DEFAULT_PYTHON = os.environ.get("GRID_MAMBA_PYTHON", sys.executable)
 RUNTIME_PROFILER = REPO_ROOT / "tools" / "profile_evuav_runtime.py"
 
 SEED = 37

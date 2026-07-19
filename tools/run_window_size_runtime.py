@@ -23,7 +23,7 @@ import run_ablation as core
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PYTHON = "/home/zikun/anaconda3/envs/grid_mamba/bin/python"
+DEFAULT_PYTHON = os.environ.get("GRID_MAMBA_PYTHON", sys.executable)
 DEFAULT_OUTPUT_ROOT = (
     REPO_ROOT / "save_model" / "grid_mamba" / "window_size_runtime"
 )
