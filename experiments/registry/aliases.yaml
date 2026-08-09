@@ -1,0 +1,17 @@
+schema_version: 1
+
+hlc2_logical_aliases:
+  MC06: evuav_full
+  LS07: evuav_full
+  CS02: evuav_full
+  CP01: MC04
+  CP03: MC05
+  CP05: evuav_full
+
+window_size_aliases:
+  W400: evuav_full
+
+legacy_path_policy:
+  preserve_historical_files: true
+  rewrite_historical_paths: false
+  compatibility_symlinks: false

@@ -24,7 +24,7 @@ def parse_args():
     )
     parser.add_argument(
         "--root",
-        default="dataset/Ev-Flying-processed",
+        default="../datasets/EV-Flying",
         help="Root containing train/val/test processed npz files.",
     )
     parser.add_argument(

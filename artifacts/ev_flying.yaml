@@ -10,12 +10,12 @@ environment:
   conda: grid_mamba
 checkpoint:
   id: best_iou
-  path: save_model/grid_mamba/ablation_ev_flying/EF45/best_iou_seed37.pt
+  path: experiments/runs/ev_flying/baseline/EF45/best_iou_seed37.pt
   size_bytes: 7469654
   sha256: 6e50c9854d82151441c584e6136d893f0580050380e754727b08f47816284ba7
   selection: User-confirmed final Grid_Mamba EV-Flying checkpoint from experiment EF45.
 evaluation:
-  summary: save_model/grid_mamba/ablation_ev_flying/EF45/summary.json
+  summary: experiments/runs/ev_flying/baseline/EF45/summary.json
   threshold: 0.39
   Pd: 0.8805351162783533
   Fa: 0.03719623259575211
@@ -26,7 +26,7 @@ runtime:
   unit: ms_per_complete_sample
   runtime_ms: 175.69977533804555
   repeat_cv_percent: 0.011246006247814846
-  summary: analysis_outputs/ev_flying_runtime_v1/grid_mamba/runtime_summary.json
+  summary: experiments/runs/ev_flying/runtime/baseline_common_v1/grid_mamba/runtime_summary.json
   summary_sha256: 2577ba285c7facd235718c035546f149deda79716bcaa78c41d09af6bd6d9104
-  per_sample: analysis_outputs/ev_flying_runtime_v1/grid_mamba/runtime_per_sample.csv
+  per_sample: experiments/runs/ev_flying/runtime/baseline_common_v1/grid_mamba/runtime_per_sample.csv
   per_sample_sha256: 670e23a071a37e45c4a1f3f17d5cae9e59f27d3e4ebf254bd71feeeba5f8b54b

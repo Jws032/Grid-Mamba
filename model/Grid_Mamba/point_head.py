@@ -4,7 +4,8 @@ import torch.nn as nn
 class PointHead(nn.Module):
     def __init__(self, in_dim, num_classes=1):
         super().__init__()
-        self.num_classes = num_classes
+        if int(num_classes) != 1:
+            raise ValueError("Grid Mamba only supports binary event segmentation")
         
         # 1. 尺度自适应注意力：动态学习三个尺度的权重
         # 维度收缩率设为 8，减少参数量
@@ -22,7 +23,7 @@ class PointHead(nn.Module):
         self.fc2 = nn.Linear(256, 128)
         self.ln2 = nn.LayerNorm(128)
         
-        self.fc3 = nn.Linear(128, num_classes)
+        self.fc3 = nn.Linear(128, 1)
         
         self.relu = nn.ReLU(inplace=True)
         self.dropout = nn.Dropout(0.1)
@@ -53,8 +54,4 @@ class PointHead(nn.Module):
         # --- C. 最终映射 ---
         output = self.fc3(x)
         
-        # 二分类 squeeze 到 [N]
-        if self.num_classes == 1:
-            output = output.squeeze(-1)
-            
-        return output
+        return output.squeeze(-1)

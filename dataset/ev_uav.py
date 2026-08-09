@@ -20,8 +20,6 @@ class EvUAV(BaseDataLoader):
         file_name = self.file_list[sample_idx]
         events = np.load(os.path.join(self.root,file_name))
         evs_norm,ev_loc,seg_label,idx= events['evs_norm'][:,0:4],events['ev_loc'],events['evs_norm'][:,4],events['evs_norm'][:,5]
-        knn_cache_key = f"{self.mode}/{os.path.splitext(file_name)[0]}"
-
         if self.mode=='train':
             num_events = ev_loc.shape[0]
             if num_events >= cfg.max_events_num:
@@ -30,7 +28,6 @@ class EvUAV(BaseDataLoader):
                 evs_norm=evs_norm[dowmsample_idx]
                 seg_label = seg_label[dowmsample_idx]
                 idx = idx[dowmsample_idx]
-                knn_cache_key = None
                 print('downsample')
 
         out={}
@@ -41,7 +38,6 @@ class EvUAV(BaseDataLoader):
         out['idx'] = idx
         out['file_name'] = file_name
         out['split'] = self.mode
-        out['knn_cache_key'] = knn_cache_key
 
         return out
 

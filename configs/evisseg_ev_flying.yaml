@@ -15,24 +15,9 @@ GRID_MAMBA:
   use_grid_pos_encoding: True
   use_spatial_window_context: True
 
-  tau_t: 50
-  spatial_grid_size: 5
-  time_bin_size: 10.0
-  use_global_density: True
-  use_ts_embedding: False
-  use_streaming_ts_embedding: False
-  ts_stream_norm_min_count: 256
-  ts_stream_norm_eps: 0.000001
-
-  use_knn_spatial_encoder: False
-
-  use_sparse_conv_encoder: True
   sparse_conv_voxel_size: [1.0, 1.0, 1.0]
   sparse_conv_kernel_size: [3, 3, 3]
   sparse_conv_dilations: [1, 2, 3, 4]
-  sparse_conv_spatial_dilations: null
-  sparse_conv_time_dilations: null
-  sparse_conv_hidden_dim: 128
   sparse_conv_ad_channels: 16
   sparse_conv_se_reduction: 2
   sparse_conv_alpha_init: 0.1
@@ -64,19 +49,15 @@ GRID_MAMBA:
   spatial_context_expand: 1
   spatial_context_dropout: 0.15
   spatial_context_alpha_init: 0.1
-  spatial_pool_use_score: True
   use_stream_mamba_checkpoint: False
   use_temporal_cell_diffusion: True
   temporal_cell_diffusion_kernel_size: 3
-  temporal_cell_diffusion_source: prev_context
-  temporal_context_diffusion_alpha_init: 0.1
-  temporal_context_diffusion_gate_bias: -2.0
-  temporal_token_diffusion_alpha_init: 0.05
-  temporal_token_diffusion_gate_bias: -3.0
+  temporal_cell_diffusion_alpha_init: 0.1
+  temporal_cell_diffusion_gate_bias: -2.0
 
 DATA:
   input_channel: 4
-  root: dataset/Ev-Flying-processed
+  root: ../datasets/EV-Flying
   dataset_name: ev_flying
   whole_t: 8000
   res: [1280, 720]
@@ -102,7 +83,7 @@ TRAIN:
   cudnn_benchmark: True
   empty_cache_every_batch: False
   early_stopping: False
-  model_save_root: save_model/grid_mamba/ev_flying
+  model_save_root: experiments/runs/ev_flying/baseline/EF45
 
 TEST:
   vis: False
@@ -111,4 +92,4 @@ TEST:
   pd_detT: 50
   correct_thresh: 0.0001
   save: True
-  model_path: save_model/grid_mamba/ev_flying/best_iou_seed37.pt
+  model_path: experiments/runs/ev_flying/baseline/EF45/best_iou_seed37.pt

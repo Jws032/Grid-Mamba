@@ -1,0 +1,52 @@
+format_version: 1
+model: Grid_Mamba
+experiment: EF54_25ms
+purpose: runtime_only_checkpoint
+performance_metrics_status: diagnostic_only
+dataset:
+  name: EV-Flying
+  training_split: train
+  validation_split: val
+  checkpoint_selection_split: none
+  fred_data_used_for_checkpoint_selection: false
+environment:
+  conda: grid_mamba
+checkpoint:
+  id: best_iou
+  path: experiments/archive_pending/diagnostic_runs/ev_flying/EF54_25ms/best_iou_seed37.pt
+  legacy_path: save_model/grid_mamba/ablation_ev_flying/EF54_25ms/best_iou_seed37.pt
+  size_bytes: 7469654
+  sha256: 3d79e1dfaee0f1312b8ba3f43359d389570a32740efc133218b2ddbbf924aaf2
+  selection: The only completed epoch (epoch 0); no cross-epoch selection.
+  selected_epoch: 0
+config:
+  path: experiments/archive_pending/diagnostic_runs/ev_flying/EF54_25ms/train_config.yaml
+  legacy_path: save_model/grid_mamba/ablation_ev_flying/EF54_25ms/train_config.yaml
+  sha256: 38715d97fcfa41edff7105b4687d1834e26ac1880be4475a28d026fd3f9198bf
+  window_size_ms: 25.0
+  complete_stream_duration_ms: 8000.0
+  updates_per_stream: 320
+  output_frequency_hz: 40.0
+training:
+  status: complete
+  completed_epochs: 1
+  last_completed_epoch: 0
+  seed: 37
+  train_loss: 0.3058155011378837
+  val_loss: 0.2043113242624338
+  val_iou_diagnostic: 0.7739054560661316
+  memory_strategy: 8_window_truncated_bptt_with_per_step_swc_checkpoint
+  backward_chunk_windows: 8
+  gradient_horizon_ms: 200.0
+  latest_train_state:
+    path: experiments/archive_pending/diagnostic_runs/ev_flying/EF54_25ms/latest_train_state_seed37.pt
+    legacy_path: save_model/grid_mamba/ablation_ev_flying/EF54_25ms/latest_train_state_seed37.pt
+    sha256: 452839d89d46e18fb52831573256108f34b5ba68e3a84632dc636b2a8f580c5c
+verification:
+  strict_model_load: true
+  state_dict_keys: 96
+  model_parameters: 1858037
+  architecture_matches_ef53_50ms: true
+evaluation:
+  ev_flying_test_status: not_required_for_runtime_only_checkpoint
+  fred_runtime_status: pending_w25_adapter

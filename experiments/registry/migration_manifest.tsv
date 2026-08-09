@@ -1,0 +1,34 @@
+action	classification	source	destination_or_retained_copy	reason
+move	canonical	save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID	experiments/runs/evuav/baseline/FULL_SC12	canonical full model
+move	canonical	save_model/grid_mamba/hlc2_paper_ablation	experiments/runs/evuav/ablation/hlc2	formal HLC2 ablation
+archive	superseded	experiments/runs/evuav/ablation/hlc2/CP04	experiments/archive_pending/superseded_runs/hlc2/CP04_original	CP04 original replaced by rerun1
+move	canonical	save_model/grid_mamba/hlc2_paper_ablation_cp04_rerun1/CP04	experiments/runs/evuav/ablation/hlc2/CP04	paper-selected CP04 rerun1
+move	canonical	save_model/grid_mamba/ablation_window_size	experiments/runs/evuav/window_size/formal	assembled paper-selected window runs
+archive	superseded	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W300_FULL	experiments/archive_pending/superseded_runs/window_size/W300_original	W300 replaced by rerun2
+archive	superseded	save_model/grid_mamba/ablation_window_size_curve_rerun1	experiments/archive_pending/superseded_runs/window_size/rerun1	W50/W300 rerun1 not selected
+archive	superseded	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W400_FULL	experiments/archive_pending/superseded_runs/window_size/W400_curve	paper W400 uses full baseline
+archive	superseded	save_model/grid_mamba/ablation_win50_no_overlap	experiments/archive_pending/superseded_runs/window_size/win50_no_overlap	non-selected diagnostic variants
+move	canonical	save_model/grid_mamba/ablation_ev_flying/EF45	experiments/runs/ev_flying/baseline/EF45	formal EV-Flying experiment
+archive	diagnostic	save_model/grid_mamba/ablation_ev_flying/EF53_50ms	experiments/archive_pending/diagnostic_runs/ev_flying/EF53_50ms	only EF45 retained as formal
+archive	diagnostic	save_model/grid_mamba/ablation_ev_flying/EF54_25ms	experiments/archive_pending/diagnostic_runs/ev_flying/EF54_25ms	only EF45 retained as formal
+move	diagnostic	experiments/archive_pending/diagnostic_runs/ev_flying/manifests/ev_flying_ef53_50ms.yaml	artifacts/ev_flying_ef53_50ms.yaml	tracked regular manifest replaces ignored-target compatibility link
+move	diagnostic	experiments/archive_pending/diagnostic_runs/ev_flying/manifests/ev_flying_ef54_25ms_runtime.yaml	artifacts/ev_flying_ef54_25ms_runtime.yaml	tracked regular manifest replaces ignored-target compatibility link
+move	canonical	analysis_outputs/evuav_runtime_v1/grid_mamba	experiments/runs/evuav/runtime/baseline_common_v1	paper-adopted common runtime
+move	canonical	analysis_outputs/ev_flying_runtime_v1/grid_mamba	experiments/runs/ev_flying/runtime/baseline_common_v1	EF45 runtime
+move	canonical	outputs/runtime/evuav_window_scaled_temporal_hierarchy_runtime_v1	experiments/runs/evuav/runtime/causal_window_v1	window runtime protocol
+archive	legacy	save_model/grid_mamba/window_size_runtime	experiments/archive_pending/legacy_runtime/window_size_full_sample	legacy runtime protocol
+move	analysis	analysis_outputs/*	experiments/analysis/*	thematic analysis outputs
+move	generated	visualization/*	experiments/figures/generated/*	regenerable visualization galleries
+archive	legacy	mlruns	experiments/archive_pending/tracking/mlruns_legacy	stale MLflow artifact URIs
+delete	duplicate	ablation_window_size_curve/W50	formal window W50	byte-identical recursive diff
+delete	duplicate	ablation_window_size_curve/W100	formal window W100	byte-identical recursive diff
+delete	duplicate	ablation_window_size_curve/W200	formal window W200	byte-identical recursive diff
+delete	duplicate	ablation_window_size_curve_rerun2/W300	formal window W300	byte-identical recursive diff
+delete	duplicate	ablation_window_size_curve/W800	formal window W800	byte-identical recursive diff
+delete	duplicate	ablation_window_size_curve/W1600	formal window W1600	byte-identical recursive diff
+delete	duplicate	ablation_window_size/FULL_SC12	experiments/runs/evuav/baseline/FULL_SC12	byte-identical recursive diff
+delete	failed	ablation_window_size_curve/W500	-none-	interrupted, no checkpoint or summary
+delete	failed	ablation_window_size_curve/W600	-none-	no checkpoint or summary
+delete	smoke	analysis_outputs/evuav_stage_features/background_calibration_val_smoke	-none-	explicit smoke output
+delete	smoke	analysis_outputs/evuav_runtime_v1/grid_mamba_smoke	-none-	explicit smoke output
+delete	smoke	outputs/runtime/evuav_window_scaled_temporal_hierarchy_runtime_v1/*/smoke	-none-	eight explicit smoke outputs

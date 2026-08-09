@@ -1,0 +1,29 @@
+schema_version: 1
+paper_frozen: true
+
+protocols:
+  evuav_baseline_common_v1:
+    status: canonical
+    path: experiments/runs/evuav/runtime/baseline_common_v1
+    paper_runtime_ms: 190.145
+    note: Runtime adopted by the completed paper.
+
+  evuav_causal_window_v1:
+    status: canonical
+    path: experiments/runs/evuav/runtime/causal_window_v1
+    note: Window-scaled temporal hierarchy runtime assets; smoke outputs removed.
+
+  evuav_full_sample_legacy:
+    status: legacy
+    path: experiments/archive_pending/legacy_runtime/window_size_full_sample
+    note: Kept separate from the paper-adopted runtime protocol.
+
+  ev_flying_baseline_common_v1:
+    status: canonical
+    path: experiments/runs/ev_flying/runtime/baseline_common_v1
+    source_experiment: EF45
+
+  fred_event_count_adaptivity_v1:
+    status: external_reference
+    path: ../outputs/runtime/fred_event_count_adaptivity_v1
+    note: Workspace-level multi-model asset; not moved in the first pass.

@@ -118,14 +118,12 @@ class FredSegmentation(BaseDataLoader):
             t_us_sel = events["t_us"]
             label_sel = events["label"]
             instance_sel = events["instance_id"]
-            downsampled = False
         else:
             x_sel = x[indices]
             y_sel = events["y"][indices]
             t_us_sel = events["t_us"][indices]
             label_sel = events["label"][indices]
             instance_sel = events["instance_id"][indices]
-            downsampled = True
 
         points = np.empty((x_sel.shape[0], 3), dtype=np.float32)
         points[:, 0] = x_sel.astype(np.float32, copy=False)
@@ -135,17 +133,12 @@ class FredSegmentation(BaseDataLoader):
         seg_label = label_sel.astype(np.float32, copy=False)
         track_idx = instance_sel.astype(np.float32, copy=False)
 
-        knn_cache_key = None
-        if not downsampled:
-            knn_cache_key = f"{self.mode}/{path.stem}"
-
         return {
             "points": points,
             "seg_label": seg_label,
             "idx": track_idx,
             "file_name": str(rel_path),
             "split": self.mode,
-            "knn_cache_key": knn_cache_key,
         }
 
     def __len__(self):

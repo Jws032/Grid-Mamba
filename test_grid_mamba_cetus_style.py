@@ -50,13 +50,6 @@ def build_dataset(cfg, mode):
     raise ValueError(f"Unsupported dataset_name: {dataset_name}")
 
 
-def get_single_knn_cache_key(batch):
-    keys = batch.get("knn_cache_key")
-    if isinstance(keys, (list, tuple)) and len(keys) == 1:
-        return keys[0]
-    return None
-
-
 def get_single_value(batch, key):
     values = batch.get(key)
     if isinstance(values, (list, tuple)) and len(values) == 1:
@@ -178,7 +171,6 @@ if __name__ == '__main__':
 
                 with torch.no_grad():
                     points = ev['points'].float()
-                    knn_cache_key = get_single_knn_cache_key(ev)
                     preds = stream_predict_full_sample(
                         net,
                         points,
@@ -186,7 +178,6 @@ if __name__ == '__main__':
                         window_size=float(cfg.window_size),
                         amp_enabled=use_amp,
                         amp_dtype=amp_dtype,
-                        knn_cache_key=knn_cache_key,
                     )
                     probs = torch.sigmoid(preds.reshape(-1))
                     pred_binary = probs >= 0.9
@@ -286,7 +277,6 @@ if __name__ == '__main__':
                 points = ev['points'].float()
                 label = ev['seg_label'].float()
                 idx = ev['idx_label']
-                knn_cache_key = get_single_knn_cache_key(ev)
 
                 # 完整样本留在CPU；每个完整400ms逻辑窗口只执行一次模型前向，
                 # 并在相邻逻辑窗口之间保持SWC状态。
@@ -297,7 +287,6 @@ if __name__ == '__main__':
                     window_size=float(cfg.window_size),
                     amp_enabled=use_amp,
                     amp_dtype=amp_dtype,
-                    knn_cache_key=knn_cache_key,
                 )
                 
                 # 计算概率和二值预测

@@ -27,10 +27,12 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Build EV-Flying processed npz data with offline Prophesee-DEM-style hot-pixel filtering."
     )
-    parser.add_argument("--src", default="dataset/Ev-Flying", help="Raw EV-Flying root.")
+    parser.add_argument(
+        "--src", default="../datasets/EV-Flying-raw", help="Raw EV-Flying root."
+    )
     parser.add_argument(
         "--dst",
-        default="dataset/Ev-Flying-processed",
+        default="../datasets/EV-Flying",
         help="Processed output root used by dataset/ev_flying.py.",
     )
     parser.add_argument("--window-ms", type=int, default=8000)
@@ -58,7 +60,7 @@ def parse_args():
     )
     parser.add_argument(
         "--denoised-raw-root",
-        default="dataset/Ev-Flying-denoised-dem",
+        default="../datasets/EV-Flying-denoised-dem",
         help="Output root for optional denoised raw .npy files.",
     )
     return parser.parse_args()

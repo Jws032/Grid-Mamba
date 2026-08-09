@@ -5,8 +5,6 @@ from torch.utils.checkpoint import checkpoint
 from .local_mamba_block import LocalMambaBlock
 from .point_head import PointHead
 from .spatial_window_context import SpatialWindowContext
-from .tsgraph_embedding import TSGraphEmbedding
-from .window_knn_spatial_encoder import WindowKNNSpatialEncoder
 from .window_sparse_conv_encoder import WindowSparseConvEncoder
 
 
@@ -15,14 +13,13 @@ class GridMambaNet(nn.Module):
     GridMambaNet with spatial window context.
 
     核心设计：
-    1. 使用全局 TSGraphEmbedding 编码事件点特征；
+    1. 使用坐标 MLP 与稀疏 3D 卷积编码事件点特征；
     2. 在 forward 内部按时间 window 分段；
-    3. 每个 window 内采用多尺度 3D grid 划分；
-    4. 每个 window 先输出逐点 fused feature，而不是立即分类；
-    5. 将每个 window 的 fused feature 聚合为低分辨率 spatial token map；
-    6. 对每个空间 cell 沿 window 维度使用 Mamba 建模跨窗口上下文；
-    7. 使用轻量 3x3 spatial conv 允许相邻空间 cell 交换历史上下文；
-    8. 将空间上下文按点所在 cell 加回 fused feature，再送入 PointHead。
+    3. 每个 window 内采用多尺度 3D grid 与 Local Mamba 建模；
+    4. 将每个 window 的 fused feature 聚合为低分辨率 spatial token map；
+    5. 对每个空间 cell 沿 window 维度使用 Mamba 建模跨窗口上下文；
+    6. 使用 prev-context 扩散和可选的后置空间卷积传播历史上下文；
+    7. 将空间上下文按点所在 cell 加回 fused feature，再送入 PointHead。
 
     """
 
@@ -33,7 +30,6 @@ class GridMambaNet(nn.Module):
         embed_dim = getattr(cfg, "embed_dim", 128)
         num_classes = getattr(cfg, "num_classes", 1)
 
-        self.num_classes = num_classes
         self.window_size = float(getattr(cfg, "window_size", 400.0))
         self.use_grid_pos_encoding = bool(getattr(cfg, "use_grid_pos_encoding", True))
         self.use_local_mamba = bool(getattr(cfg, "use_local_mamba", True))
@@ -87,92 +83,26 @@ class GridMambaNet(nn.Module):
             persistent=False,
         )
 
-        self.use_ts_embedding = bool(getattr(cfg, "use_ts_embedding", True))
-        self.use_streaming_ts_embedding = bool(
-            getattr(cfg, "use_streaming_ts_embedding", False)
+        # 正式模型统一使用归一化坐标 MLP。
+        self.coord_encoder = nn.Sequential(
+            nn.Linear(input_dim, embed_dim),
+            nn.ReLU(),
+            nn.Linear(embed_dim, embed_dim),
+            nn.ReLU(),
+            nn.Linear(embed_dim, embed_dim),
         )
-        if self.use_ts_embedding:
-            self.ts_encoder = TSGraphEmbedding(
-                input_dim=input_dim,
-                hidden_dim=embed_dim,
-                output_dim=embed_dim,
-                sensor_size=sensor_size,
-                time_max=self.time_max,
-                tau_t=getattr(cfg, "tau_t", 50),
-                spatial_grid_size=getattr(cfg, "spatial_grid_size", 5),
-                time_bin_size=getattr(cfg, "time_bin_size", 10.0),
-                use_global_density=getattr(cfg, "use_global_density", True),
-                stream_norm_min_count=getattr(cfg, "ts_stream_norm_min_count", 128),
-                stream_norm_eps=getattr(cfg, "ts_stream_norm_eps", 1e-6),
-            )
-            self.coord_encoder = None
-        else:
-            self.use_streaming_ts_embedding = False
-            self.ts_encoder = None
-            self.coord_encoder = nn.Sequential(
-                nn.Linear(input_dim, embed_dim),
-                nn.ReLU(),
-                nn.Linear(embed_dim, embed_dim),
-                nn.ReLU(),
-                nn.Linear(embed_dim, embed_dim),
-            )
 
-        self.use_knn_spatial_encoder = bool(
-            getattr(cfg, "use_knn_spatial_encoder", False)
+        # Window Sparse Conv 是所有正式模型和消融实验共享的输入编码模块。
+        self.sparse_conv_encoder = WindowSparseConvEncoder(
+            d_model=embed_dim,
+            voxel_size=getattr(cfg, "sparse_conv_voxel_size", [1.0, 1.0, 1.0]),
+            kernel_size=getattr(cfg, "sparse_conv_kernel_size", [3, 3, 3]),
+            dropout=getattr(cfg, "sparse_conv_dropout", 0.1),
+            alpha_init=getattr(cfg, "sparse_conv_alpha_init", 0.1),
+            dilations=getattr(cfg, "sparse_conv_dilations", [1, 2, 3, 4]),
+            ad_channels=getattr(cfg, "sparse_conv_ad_channels", 16),
+            se_reduction=getattr(cfg, "sparse_conv_se_reduction", 2),
         )
-        self.use_sparse_conv_encoder = bool(
-            getattr(cfg, "use_sparse_conv_encoder", False)
-        )
-        if self.use_knn_spatial_encoder and self.use_sparse_conv_encoder:
-            raise ValueError(
-                "use_knn_spatial_encoder and use_sparse_conv_encoder cannot both be True"
-            )
-
-        if self.use_knn_spatial_encoder:
-            self.knn_spatial_encoder = WindowKNNSpatialEncoder(
-                d_model=embed_dim,
-                k_neighbors=getattr(cfg, "knn_spatial_k", 8),
-                spatial_radius=getattr(cfg, "knn_spatial_radius", 24.0),
-                time_radius=getattr(cfg, "knn_time_radius", 100.0),
-                spatial_cell_size=getattr(cfg, "knn_spatial_cell_size", 24.0),
-                time_cell_size=getattr(cfg, "knn_time_cell_size", 100.0),
-                num_heads=getattr(cfg, "knn_spatial_num_heads", 4),
-                dropout=getattr(cfg, "knn_spatial_dropout", 0.1),
-                alpha_init=getattr(cfg, "knn_spatial_alpha_init", 0.1),
-                distance_bias_init=getattr(cfg, "knn_distance_bias_init", 1.0),
-                causal=getattr(cfg, "knn_causal", False),
-                query_chunk_size=getattr(cfg, "knn_query_chunk_size", 1024),
-                use_cache=getattr(cfg, "use_knn_cache", False),
-                cache_root=getattr(cfg, "knn_cache_root", None),
-                cache_splits=getattr(cfg, "knn_cache_splits", None),
-                cache_window_size=self.window_size,
-            )
-        else:
-            self.knn_spatial_encoder = None
-
-        if self.use_sparse_conv_encoder:
-            self.sparse_conv_encoder = WindowSparseConvEncoder(
-                d_model=embed_dim,
-                voxel_size=getattr(cfg, "sparse_conv_voxel_size", [1.0, 1.0, 1.0]),
-                kernel_size=getattr(cfg, "sparse_conv_kernel_size", [3, 3, 3]),
-                dropout=getattr(cfg, "sparse_conv_dropout", 0.1),
-                alpha_init=getattr(cfg, "sparse_conv_alpha_init", 0.1),
-                dilations=getattr(cfg, "sparse_conv_dilations", [1, 2, 3, 4]),
-                spatial_dilations=getattr(
-                    cfg,
-                    "sparse_conv_spatial_dilations",
-                    None,
-                ),
-                time_dilations=getattr(
-                    cfg,
-                    "sparse_conv_time_dilations",
-                    None,
-                ),
-                ad_channels=getattr(cfg, "sparse_conv_ad_channels", 16),
-                se_reduction=getattr(cfg, "sparse_conv_se_reduction", 2),
-            )
-        else:
-            self.sparse_conv_encoder = None
 
         # 多尺度 3D grid: [x_stride, y_stride, t_stride]
         self.scale_strides = getattr(
@@ -189,18 +119,6 @@ class GridMambaNet(nn.Module):
             torch.as_tensor(self.scale_strides, dtype=torch.float32),
             persistent=False,
         )
-
-        active_window_local_modules = sum(
-            bool(flag)
-            for flag in (
-                self.use_knn_spatial_encoder,
-                self.use_sparse_conv_encoder,
-            )
-        )
-        if active_window_local_modules > 1:
-            raise ValueError(
-                "use_knn_spatial_encoder and use_sparse_conv_encoder cannot both be True"
-            )
 
         if self.use_local_mamba:
             local_mamba_kwargs = dict(
@@ -255,7 +173,6 @@ class GridMambaNet(nn.Module):
                 dropout=getattr(cfg, "spatial_context_dropout", 0.1),
                 use_conv=getattr(cfg, "spatial_context_use_conv", True),
                 alpha_init=getattr(cfg, "spatial_context_alpha_init", 0.1),
-                spatial_pool_use_score=getattr(cfg, "spatial_pool_use_score", True),
                 use_stream_mamba_checkpoint=getattr(
                     cfg,
                     "use_stream_mamba_checkpoint",
@@ -280,31 +197,6 @@ class GridMambaNet(nn.Module):
                     cfg,
                     "temporal_cell_diffusion_kernel_size",
                     3,
-                ),
-                temporal_cell_diffusion_source=getattr(
-                    cfg,
-                    "temporal_cell_diffusion_source",
-                    "prev_context",
-                ),
-                temporal_context_diffusion_alpha_init=getattr(
-                    cfg,
-                    "temporal_context_diffusion_alpha_init",
-                    getattr(cfg, "temporal_cell_diffusion_alpha_init", 0.1),
-                ),
-                temporal_context_diffusion_gate_bias=getattr(
-                    cfg,
-                    "temporal_context_diffusion_gate_bias",
-                    getattr(cfg, "temporal_cell_diffusion_gate_bias", -2.0),
-                ),
-                temporal_token_diffusion_alpha_init=getattr(
-                    cfg,
-                    "temporal_token_diffusion_alpha_init",
-                    0.05,
-                ),
-                temporal_token_diffusion_gate_bias=getattr(
-                    cfg,
-                    "temporal_token_diffusion_gate_bias",
-                    -3.0,
                 ),
             )
         else:
@@ -474,18 +366,9 @@ class GridMambaNet(nn.Module):
         return torch.cat(scale_feats, dim=-1)
 
     def _classify_features(self, fused_feat: torch.Tensor) -> torch.Tensor:
-        out = self.head(fused_feat)
-
-        # 二分类场景下与 [N] 标签对齐
-        if self.num_classes == 1 and out.dim() == 2 and out.size(-1) == 1:
-            out = out.squeeze(-1)
-
-        return out
+        return self.head(fused_feat)
 
     def _encode_input_features(self, points: torch.Tensor) -> torch.Tensor:
-        if self.use_ts_embedding:
-            return self.ts_encoder.encode_features(points)
-
         limits = self._point_limits.to(
             dtype=points.dtype,
             device=points.device,
@@ -493,44 +376,12 @@ class GridMambaNet(nn.Module):
         normalized_points = (points[:, :3] / limits.unsqueeze(0)).clamp(0.0, 1.0)
         return self.coord_encoder(normalized_points)
 
-    def _encode_streaming_input_features(self, points: torch.Tensor, ts_state):
-        if self.use_ts_embedding and self.use_streaming_ts_embedding:
-            return self.ts_encoder.forward_streaming(points, ts_state)
-
-        return self._encode_input_features(points), ts_state
-
-    def _apply_window_knn_spatial_encoder(
-        self,
-        points: torch.Tensor,
-        feats: torch.Tensor,
-        knn_cache_key=None,
-        window_id=None,
-    ) -> torch.Tensor:
-        if self.knn_spatial_encoder is None:
-            return feats
-        return self.knn_spatial_encoder(
-            points,
-            feats,
-            cache_key=knn_cache_key,
-            window_id=window_id,
-        )
-
     def _apply_window_local_encoder(
         self,
         points: torch.Tensor,
         feats: torch.Tensor,
-        knn_cache_key=None,
-        window_id=None,
     ) -> torch.Tensor:
-        feats = self._apply_window_knn_spatial_encoder(
-            points,
-            feats,
-            knn_cache_key=knn_cache_key,
-            window_id=window_id,
-        )
-        if self.sparse_conv_encoder is not None:
-            feats = self.sparse_conv_encoder(points, feats)
-        return feats
+        return self.sparse_conv_encoder(points, feats)
 
     def _forward_one_window(
         self,
@@ -544,8 +395,6 @@ class GridMambaNet(nn.Module):
         self,
         points: torch.Tensor,
         prev_state=None,
-        knn_cache_key=None,
-        window_id=0,
     ):
         """Run one pre-segmented logical time window.
 
@@ -556,19 +405,12 @@ class GridMambaNet(nn.Module):
         """
         if points.numel() == 0:
             return points.new_empty((0,)), prev_state
-        if self.use_ts_embedding and self.use_streaming_ts_embedding:
-            raise RuntimeError(
-                "forward_stream_window does not yet support streaming TS embedding"
-            )
-
         sort_idx = torch.argsort(points[:, 2])
         points_sorted = points[sort_idx]
         feats_sorted = self._encode_input_features(points_sorted)
         feats_sorted = self._apply_window_local_encoder(
             points_sorted,
             feats_sorted,
-            knn_cache_key=knn_cache_key,
-            window_id=int(window_id),
         )
 
         if not self.use_spatial_window_context:
@@ -601,7 +443,6 @@ class GridMambaNet(nn.Module):
         points: torch.Tensor,
         chunk_size: int,
         prev_state=None,
-        knn_cache_key=None,
     ):
         """
         Yield point logits by time-window chunks for truncated training backward.
@@ -614,13 +455,6 @@ class GridMambaNet(nn.Module):
             return
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
-
-        use_streaming_ts = self.use_ts_embedding and self.use_streaming_ts_embedding
-        if self.use_ts_embedding and not use_streaming_ts:
-            raise RuntimeError(
-                "iter_forward_window_chunks requires use_ts_embedding=False "
-                "or use_streaming_ts_embedding=True"
-            )
 
         sort_idx = torch.argsort(points[:, 2])
         points_sorted = points[sort_idx]
@@ -644,26 +478,17 @@ class GridMambaNet(nn.Module):
 
         outputs = []
         output_indices = []
-        ts_state = None
         spatial_context_state = prev_state
 
         for i in range(counts.numel()):
             start = cum_counts[i]
             end = cum_counts[i + 1]
             win_points = points_sorted[start:end]
-            if use_streaming_ts:
-                win_feats, ts_state = self._encode_streaming_input_features(
-                    win_points,
-                    ts_state,
-                )
-            else:
-                win_feats = self._encode_input_features(win_points)
+            win_feats = self._encode_input_features(win_points)
 
             win_feats = self._apply_window_local_encoder(
                 win_points,
                 win_feats,
-                knn_cache_key=knn_cache_key,
-                window_id=int(i),
             )
 
             if not self.use_spatial_window_context:
@@ -698,7 +523,7 @@ class GridMambaNet(nn.Module):
                         spatial_context_state
                     )
 
-    def forward(self, points: torch.Tensor, prev_state=None, knn_cache_key=None):
+    def forward(self, points: torch.Tensor, prev_state=None):
         """
         前向传播入口。
 
@@ -715,18 +540,12 @@ class GridMambaNet(nn.Module):
         if points.numel() == 0:
             return None, prev_state
 
-        use_streaming_ts = self.use_ts_embedding and self.use_streaming_ts_embedding
-
         # 1. 按时序排序，划分窗口
         sort_idx = torch.argsort(points[:, 2])
         points_sorted = points[sort_idx]
 
-        if use_streaming_ts:
-            feats_sorted = None
-        else:
-            # Offline/debug 路径：保持旧行为，先全 sample 编码再切 window。
-            feats = self._encode_input_features(points)
-            feats_sorted = feats[sort_idx]
+        feats = self._encode_input_features(points)
+        feats_sorted = feats[sort_idx]
 
         t = points_sorted[:, 2]
         window_ids = torch.div(
@@ -752,25 +571,16 @@ class GridMambaNet(nn.Module):
         if not self.use_spatial_window_context:
             # ----- 基线模式：各窗口独立前向，无跨窗口上下文 -----
             outputs = []
-            ts_state = None
             for i in range(counts.numel()):
                 start = cum_counts[i]
                 end = cum_counts[i + 1]
 
                 win_points = points_sorted[start:end]
-                if use_streaming_ts:
-                    win_feats, ts_state = self._encode_streaming_input_features(
-                        win_points,
-                        ts_state,
-                    )
-                else:
-                    win_feats = feats_sorted[start:end]
+                win_feats = feats_sorted[start:end]
 
                 win_feats = self._apply_window_local_encoder(
                     win_points,
                     win_feats,
-                    knn_cache_key=knn_cache_key,
-                    window_id=int(i),
                 )
 
                 outputs.append(self._forward_one_window(win_points, win_feats))
@@ -780,26 +590,17 @@ class GridMambaNet(nn.Module):
             # ----- 空间窗口上下文模式：逐窗口融合跨窗口上下文 -----
             outputs = []
             spatial_context_state = prev_state   # 继承上一批次的流式状态
-            ts_state = None
 
             for i in range(counts.numel()):
                 start = cum_counts[i]
                 end = cum_counts[i + 1]
 
                 win_points = points_sorted[start:end]
-                if use_streaming_ts:
-                    win_feats, ts_state = self._encode_streaming_input_features(
-                        win_points,
-                        ts_state,
-                    )
-                else:
-                    win_feats = feats_sorted[start:end]
+                win_feats = feats_sorted[start:end]
 
                 win_feats = self._apply_window_local_encoder(
                     win_points,
                     win_feats,
-                    knn_cache_key=knn_cache_key,
-                    window_id=int(i),
                 )
 
                 # 4a. 窗口内多尺度特征提取：Multi-scale Local Mamba

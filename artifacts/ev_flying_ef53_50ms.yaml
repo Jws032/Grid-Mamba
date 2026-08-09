@@ -1,0 +1,35 @@
+format_version: 1
+model: Grid_Mamba
+experiment: EF53_50ms
+dataset:
+  name: EV-Flying
+  checkpoint_selection_split: val
+environment:
+  conda: grid_mamba
+checkpoint:
+  id: best_iou
+  path: experiments/archive_pending/diagnostic_runs/ev_flying/EF53_50ms/best_iou_seed37.pt
+  legacy_path: save_model/grid_mamba/ablation_ev_flying/EF53_50ms/best_iou_seed37.pt
+  size_bytes: 7469654
+  sha256: 833ece300ce145554762cf0834c7d936456ecc7f7b2ac5470946feb22eb3ec9c
+  selection: EV-Flying validation-best IoU over the complete 50-epoch run.
+  selected_epoch: 7
+config:
+  path: experiments/archive_pending/diagnostic_runs/ev_flying/EF53_50ms/train_config.yaml
+  legacy_path: save_model/grid_mamba/ablation_ev_flying/EF53_50ms/train_config.yaml
+  sha256: 17089e44cd76b6ad631c47bb4dff38e5e70936b4ee67e3120a4e58ad96adb0f5
+  window_size_ms: 50.0
+  complete_stream_duration_ms: 8000.0
+  updates_per_stream: 160
+training:
+  status: complete
+  last_completed_epoch: 49
+  completed_epochs: 50
+  best_val_iou: 0.8554352521896362
+  latest_train_state:
+    path: experiments/archive_pending/diagnostic_runs/ev_flying/EF53_50ms/latest_train_state_seed37.pt
+    legacy_path: save_model/grid_mamba/ablation_ev_flying/EF53_50ms/latest_train_state_seed37.pt
+    sha256: 301877052fff4d7addaf34bff77455e147082049ef2ed421da9f69868593d30f
+evaluation:
+  ev_flying_test_status: not_run_for_this_complete_training_checkpoint
+  fred_runtime_status: previous_results_use_superseded_checkpoint_rerun_required

@@ -1,14 +1,9 @@
-save_model/
-mlruns/
+/mlruns/
+/mlruns
 .vscode/
-dataset/EV-UAV-dataset
-dataset/Ev-Flying/
-dataset/Ev-Flying-processed/
-
-analysis/
-analysis_outputs/
-
-visualization/
+/analysis/
+/visualization/
+/visualization
 .idea/
 __pycache__/
 *.py[cod]
@@ -26,6 +21,12 @@ whl/
 
 point_level_eval.csv
 predictions.txt
+
+# Organized experiment assets: keep the registry in Git, keep large assets local.
+experiments/runs/
+experiments/analysis/
+experiments/figures/generated/
+experiments/archive_pending/
 
 # Local training logs
 *.log

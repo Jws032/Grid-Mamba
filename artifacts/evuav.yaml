@@ -10,13 +10,13 @@ environment:
   conda: grid_mamba
 checkpoint:
   id: best_loss
-  path: save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/best_loss_seed37.pt
+  path: experiments/runs/evuav/baseline/FULL_SC12/best_loss_seed37.pt
   size_bytes: 7469754
   sha256: d4141bcf8368c4eee64554890c0d1d503ed86b02505b927a0846a16e19d32f49
   selection: User-confirmed EVUAV Grid_Mamba runtime checkpoint; summary final_checkpoint is best_loss.
 evaluation:
-  summary: save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/summary.json
-  eval_csv: save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/test_best_loss/point_level_eval.csv
+  summary: experiments/runs/evuav/baseline/FULL_SC12/summary.json
+  eval_csv: experiments/runs/evuav/baseline/FULL_SC12/test_best_loss/point_level_eval.csv
   threshold: 0.41000000000000003
   Pd: 0.9517522022965595
   Fa: 0.004543223992383235
@@ -25,12 +25,12 @@ evaluation:
 runtime:
   protocol_id: evuav_runtime_v1
   unit: ms_per_complete_sample
-  output_dir: analysis_outputs/evuav_runtime_v1/grid_mamba
-  summary: analysis_outputs/evuav_runtime_v1/grid_mamba/runtime_summary.json
+  output_dir: experiments/runs/evuav/runtime/baseline_common_v1/grid_mamba
+  summary: experiments/runs/evuav/runtime/baseline_common_v1/grid_mamba/runtime_summary.json
   summary_sha256: a8b592b015034c7e21f983d4a4d5b1b070ceefc255e43c5f19ac59a273e88b43
-  per_sample: analysis_outputs/evuav_runtime_v1/grid_mamba/runtime_per_sample.csv
+  per_sample: experiments/runs/evuav/runtime/baseline_common_v1/grid_mamba/runtime_per_sample.csv
   per_sample_sha256: 22184edbd2e6f7acb8059bde5898ab693795400a2f1c399bf208d31853252124
-  summary_csv: analysis_outputs/evuav_runtime_v1/grid_mamba/runtime_summary.csv
+  summary_csv: experiments/runs/evuav/runtime/baseline_common_v1/grid_mamba/runtime_summary.csv
   summary_csv_sha256: c92942a251ccea156797f4aaa28b4b7b6b09432c0601fc93cc6fd0e3f99a6583
   runtime_ms: 190.14491680233428
   mean_raw_ms: 190.20469969190242

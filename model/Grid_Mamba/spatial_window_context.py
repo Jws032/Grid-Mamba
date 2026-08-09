@@ -21,8 +21,8 @@ class SpatialWindowContext(nn.Module):
     1. 空间池化：加权聚合窗口内点到空间网格 (cell)。
     2. Mamba 时序建模：对每个 cell 的 token 序列沿窗口维度应用 Mamba。
     3. 可选的 3x3 深度可分离卷积：对 context map 在空间上平滑。
-    4. 可选的时序扩散 (Temporal Cell Diffusion)：利用上一窗口的 context/token 平滑当前 token map，
-       减少窗口间抖动，支持三种来源 (prev_context, prev_token, dual)。
+    4. 可选的时序扩散 (Temporal Cell Diffusion)：利用上一窗口的 context map
+       平滑当前 token map，减少窗口间抖动。
     5. 残差注入：通过可学习参数 alpha 将 context 加回原始点特征。
     """
 
@@ -37,37 +37,19 @@ class SpatialWindowContext(nn.Module):
         dropout: float = 0.1,
         use_conv: bool = True,
         alpha_init: float = 0.1,
-        spatial_pool_use_score: bool = True,
         use_stream_mamba_checkpoint: bool = True,
         use_temporal_cell_diffusion: bool = False,
         temporal_cell_diffusion_alpha_init: float = 0.1,
         temporal_cell_diffusion_gate_bias: float = -2.0,
         temporal_cell_diffusion_kernel_size: int = 3,
-        temporal_cell_diffusion_source: str = "prev_context",
-        temporal_context_diffusion_alpha_init: float = 0.1,
-        temporal_context_diffusion_gate_bias: float = -2.0,
-        temporal_token_diffusion_alpha_init: float = 0.05,
-        temporal_token_diffusion_gate_bias: float = -3.0,
     ):
         super().__init__()
 
         self.sensor_height, self.sensor_width = sensor_size
         self.spatial_context_stride = float(spatial_context_stride)
         self.spatial_context_use_conv = bool(use_conv)
-        self.spatial_pool_use_score = bool(spatial_pool_use_score)
         self.use_stream_mamba_checkpoint = bool(use_stream_mamba_checkpoint)
         self.use_temporal_cell_diffusion = bool(use_temporal_cell_diffusion)
-        self.temporal_cell_diffusion_source = str(temporal_cell_diffusion_source)
-
-        if self.temporal_cell_diffusion_source not in {
-            "prev_context",
-            "prev_token",
-            "dual",
-        }:
-            raise ValueError(
-                "temporal_cell_diffusion_source must be 'prev_context', "
-                "'prev_token', or 'dual'"
-            )
 
         if temporal_cell_diffusion_kernel_size % 2 == 0:
             raise ValueError("temporal_cell_diffusion_kernel_size must be odd")
@@ -139,39 +121,11 @@ class SpatialWindowContext(nn.Module):
             nn.init.constant_(gate.bias, gate_bias)
             return gate
 
-        # 实际初始化根据配置选择单分支或双分支
         self.temporal_cell_diffusion_conv = None
         self.temporal_cell_diffusion_gate = None
         self.temporal_cell_diffusion_alpha = None
-        self.temporal_context_diffusion_conv = None
-        self.temporal_context_diffusion_gate = None
-        self.temporal_context_diffusion_alpha = None
-        self.temporal_token_diffusion_conv = None
-        self.temporal_token_diffusion_gate = None
-        self.temporal_token_diffusion_alpha = None
 
-        if self.use_temporal_cell_diffusion and self.temporal_cell_diffusion_source == "dual":
-            self.temporal_context_diffusion_conv = make_diffusion_conv()
-            self.temporal_context_diffusion_gate = make_diffusion_gate(
-                temporal_context_diffusion_gate_bias
-            )
-            self.temporal_context_diffusion_alpha = nn.Parameter(
-                torch.tensor(
-                    temporal_context_diffusion_alpha_init,
-                    dtype=torch.float32,
-                )
-            )
-            self.temporal_token_diffusion_conv = make_diffusion_conv()
-            self.temporal_token_diffusion_gate = make_diffusion_gate(
-                temporal_token_diffusion_gate_bias
-            )
-            self.temporal_token_diffusion_alpha = nn.Parameter(
-                torch.tensor(
-                    temporal_token_diffusion_alpha_init,
-                    dtype=torch.float32,
-                )
-            )
-        elif self.use_temporal_cell_diffusion:
+        if self.use_temporal_cell_diffusion:
             self.temporal_cell_diffusion_conv = make_diffusion_conv()
             self.temporal_cell_diffusion_gate = make_diffusion_gate(
                 temporal_cell_diffusion_gate_bias
@@ -210,8 +164,6 @@ class SpatialWindowContext(nn.Module):
                 dtype=ssm_dtype,
             ),
             "prev_context_map": None,
-            "prev_token_map": None,
-            "prev_raw_token_map": None,
         }
 
     def _ensure_stream_state(self, state, reference: torch.Tensor) -> dict:
@@ -328,28 +280,13 @@ class SpatialWindowContext(nn.Module):
         state: dict,
     ) -> torch.Tensor:
         """
-        利用上一窗口的 context/token 图对当前 token map 做轻量扩散，减少窗口间特征跳变。
-        根据 source 类型选择对应的上一帧缓存和分支。
+        利用上一窗口的 context map 对当前 token map 做轻量扩散，减少窗口间特征跳变。
         """
         if not self.use_temporal_cell_diffusion:
             return token_map
 
         token_nchw = token_map.permute(2, 0, 1).unsqueeze(0).contiguous()
-
-        if self.temporal_cell_diffusion_source == "dual":
-            token_nchw = self._apply_dual_temporal_cell_diffusion(
-                token_nchw,
-                token_map,
-                state,
-            )
-            return token_nchw.squeeze(0).permute(1, 2, 0).contiguous()
-
-        source_key = (
-            "prev_context_map"
-            if self.temporal_cell_diffusion_source == "prev_context"
-            else "prev_token_map"
-        )
-        prev_map = state.get(source_key)
+        prev_map = state.get("prev_context_map")
         if prev_map is None or tuple(prev_map.shape) != tuple(token_map.shape):
             return token_map
 
@@ -381,57 +318,18 @@ class SpatialWindowContext(nn.Module):
         alpha = diffusion_alpha.to(dtype=token_nchw.dtype)
         return token_nchw + alpha * gate * diffused_prev
 
-    def _apply_dual_temporal_cell_diffusion(
-        self,
-        token_nchw: torch.Tensor,
-        token_map: torch.Tensor,
-        state: dict,
-    ) -> torch.Tensor:
-        """双源扩散：同时参考上一帧的 context map 和 raw token map，各一个分支。"""
-        ctx_map = state.get("prev_context_map")
-        raw_token_map = state.get("prev_raw_token_map")
-        if raw_token_map is None:
-            raw_token_map = state.get("prev_token_map")
-
-        residual = torch.zeros_like(token_nchw)
-
-        if ctx_map is not None and tuple(ctx_map.shape) == tuple(token_map.shape):
-            ctx_nchw = ctx_map.permute(2, 0, 1).unsqueeze(0).contiguous()
-            ctx_updated = self._apply_single_temporal_diffusion_branch(
-                token_nchw,
-                ctx_nchw,
-                self.temporal_context_diffusion_conv,
-                self.temporal_context_diffusion_gate,
-                self.temporal_context_diffusion_alpha,
-            )
-            residual = residual + (ctx_updated - token_nchw)
-
-        if raw_token_map is not None and tuple(raw_token_map.shape) == tuple(token_map.shape):
-            tok_nchw = raw_token_map.permute(2, 0, 1).unsqueeze(0).contiguous()
-            tok_updated = self._apply_single_temporal_diffusion_branch(
-                token_nchw,
-                tok_nchw,
-                self.temporal_token_diffusion_conv,
-                self.temporal_token_diffusion_gate,
-                self.temporal_token_diffusion_alpha,
-            )
-            residual = residual + (tok_updated - token_nchw)
-
-        return token_nchw + residual
-
     # ---------- 流式单步处理核心 ----------
     def _run_stream_step(
         self,
         token_map: torch.Tensor,
         state: dict,
-        raw_token_map: torch.Tensor = None,
     ):
         """
         对流式状态执行一个窗口的空间上下文更新：
         1. token map 展平为序列，经 LayerNorm
         2. 送入 Mamba 单步，更新内部状态
         3. 可选的空间卷积平滑
-        4. 更新并返回 state (包含新 context map 和 token map 缓存)
+        4. 更新并返回 state（包含新的 context map）
         """
         height, width, channels = token_map.shape
 
@@ -456,8 +354,6 @@ class SpatialWindowContext(nn.Module):
             "conv_state": conv_state,
             "ssm_state": ssm_state,
             "prev_context_map": context_map,
-            "prev_token_map": token_map,               # 用于单源扩散的“有效token”
-            "prev_raw_token_map": raw_token_map if raw_token_map is not None else token_map,
         }
 
         return context_map, new_state
@@ -519,23 +415,15 @@ class SpatialWindowContext(nn.Module):
             feat_chunk = fused_feat[start:end]
             cell_idx_chunk = cell_idx[start:end]
 
-            if self.spatial_pool_use_score:
-                if torch.is_grad_enabled() and feat_chunk.requires_grad:
-                    weight = checkpoint(
-                        self._score_spatial_pool_weight,
-                        feat_chunk,
-                        use_reentrant=False,
-                    )
-                else:
-                    weight = self._score_spatial_pool_weight(feat_chunk)
-                weight = weight.to(dtype=fused_feat.dtype)
-            else:
-                weight = torch.ones(
-                    feat_chunk.size(0),
-                    1,
-                    device=device,
-                    dtype=fused_feat.dtype,
+            if torch.is_grad_enabled() and feat_chunk.requires_grad:
+                weight = checkpoint(
+                    self._score_spatial_pool_weight,
+                    feat_chunk,
+                    use_reentrant=False,
                 )
+            else:
+                weight = self._score_spatial_pool_weight(feat_chunk)
+            weight = weight.to(dtype=fused_feat.dtype)
 
             sums.index_add_(0, cell_idx_chunk, feat_chunk * weight)
             weight_sums.index_add_(0, cell_idx_chunk, weight)
@@ -565,17 +453,17 @@ class SpatialWindowContext(nn.Module):
             cell_idx = self._get_spatial_cell_indices(points)
 
         # 1. 聚合点特征为空间 token map 
-        raw_token_map = self._pool_window_to_spatial_map(
+        token_map = self._pool_window_to_spatial_map(
             points,
             fused_feat,
             cell_idx=cell_idx,
         )
         
-        # 2. 利用上一窗口的 context/token 图对当前 token map 做轻量扩散
-        token_map = self._apply_temporal_cell_diffusion(raw_token_map, state)
+        # 2. 利用上一窗口的 context map 对当前 token map 做轻量扩散
+        token_map = self._apply_temporal_cell_diffusion(token_map, state)
         
         # 3. Mamba 单步更新 state，得到 context map
-        context_map, state = self._run_stream_step(token_map, state, raw_token_map)
+        context_map, state = self._run_stream_step(token_map, state)
 
         # 4. 按 cell 索引将 context 残差加回原始点特征
         channels = fused_feat.size(-1)

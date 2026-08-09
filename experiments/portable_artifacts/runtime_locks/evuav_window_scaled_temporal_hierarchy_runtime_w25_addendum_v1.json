@@ -1,0 +1,72 @@
+{
+  "protocol_id": "evuav_window_scaled_temporal_hierarchy_runtime_w25_addendum_v1",
+  "parent_protocol_id": "evuav_window_scaled_temporal_hierarchy_runtime_v1",
+  "parent_asset_lock_sha256": "b516be9d676da8f3c2343dd02c5c56375a938c59cf800c2da937fbe331d2aa95",
+  "variant": {
+    "id": "w25",
+    "window_ms": 25.0,
+    "experiment_dir": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W25_FULL",
+    "checkpoint": {
+      "id": "best_iou",
+      "selection": "EVUAV validation IoU",
+      "selection_epoch": 32,
+      "source_val_iou": 0.87945157289505,
+      "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W25_FULL/best_iou_seed37.pt",
+      "size_bytes": 7469654,
+      "sha256": "192edae8ce61e7e2c3f2fb4ef72f49e8119cd49e8fc39311d61dce75d60e8005"
+    },
+    "config": {
+      "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W25_FULL/train_config.yaml",
+      "size_bytes": 4126,
+      "sha256": "c180d288cdacf535381f694f8970ee5ab57e344604a5fbf564bbb191fe46e65a",
+      "scale_strides": [
+        [
+          24.0,
+          24.0,
+          25.0
+        ],
+        [
+          48.0,
+          48.0,
+          25.0
+        ],
+        [
+          128.0,
+          128.0,
+          25.0
+        ]
+      ],
+      "window_size": 25.0,
+      "use_spatial_window_context": true,
+      "use_ts_embedding": false,
+      "use_sparse_conv_encoder": true,
+      "use_stream_mamba_checkpoint": false,
+      "local_mamba_checkpoint_policy": "levels"
+    },
+    "source_summary": {
+      "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W25_FULL/summary.json",
+      "size_bytes": 2582,
+      "sha256": "45295247536abe8e4d12ff9ceae62f6064b29ef562ad8f94ba6b49f7306273c0"
+    },
+    "model_probe": {
+      "strict_load": true,
+      "device": "cpu",
+      "state_dict_keys": 96,
+      "state_dict_parameters": 1858037,
+      "model_parameters": 1858037,
+      "state_signature_sha256": "0c615d2d2dbbd9cb34f96286ab16bd505a96ba215f9c0016f517e8f4681dbb0a",
+      "all_parameters_finite": true
+    },
+    "schedule": {
+      "window_ms": 25.0,
+      "input_unit": "all_original_events_in_fixed_duration_window",
+      "scheduling": "fixed_duration_chunk_zero",
+      "expected_scheduled_updates": 320,
+      "nominal_update_frequency_hz": 40.0,
+      "realized_finite_stream_frequency_hz": 40.0,
+      "final_window_duration_ms": 25.0,
+      "has_partial_final_window": false,
+      "empty_window_policy": "retain_tick_no_event_latency_state_unchanged"
+    }
+  }
+}

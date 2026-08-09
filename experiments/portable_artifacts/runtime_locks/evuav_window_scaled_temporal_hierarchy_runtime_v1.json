@@ -1,0 +1,770 @@
+{
+  "asset_preflight": {
+    "all_test_events": 2074586,
+    "all_test_files": 24,
+    "all_variants": 7,
+    "cpu_only": true,
+    "cuda_initialized": false,
+    "strict_checkpoint_load": true,
+    "train_or_val_dataset_files_read": false
+  },
+  "checkpoint_selection": {
+    "criterion": "EVUAV validation IoU",
+    "implementation": {
+      "checkpoint_save_lines": "617-622",
+      "metric_logging_line": 609,
+      "path": "train_grid_mamba.py"
+    },
+    "metric": "IoU",
+    "mode": "max",
+    "rule": "local_best_iou_seed37_for_every_window",
+    "selection_split": "val",
+    "user_confirmed": true,
+    "uses_evuav_test_for_checkpoint_selection": false,
+    "uses_legacy_mixed_checkpoint_choice": false
+  },
+  "dataset": {
+    "files": [
+      {
+        "file_name": "test_000.npz",
+        "num_events": 44751,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_000.npz",
+        "sha256": "11aa3571d496f18b9ca07e33dccdb5bc7ddcd914dd485bea183b3cb53d33f39b",
+        "size_bytes": 662359,
+        "t_max_ms": 7999.908,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_001.npz",
+        "num_events": 24974,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_001.npz",
+        "sha256": "d641dddde461f9c9a222ce2b5cfb2a821c7c302e97c6f909b27ede8e18572e53",
+        "size_bytes": 392169,
+        "t_max_ms": 7999.517,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_002.npz",
+        "num_events": 25732,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_002.npz",
+        "sha256": "1df2b05d782513a27fa97f0c89e23255954d4480c9449b66cbc5657aab5118b3",
+        "size_bytes": 408099,
+        "t_max_ms": 7999.942,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_003.npz",
+        "num_events": 23984,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_003.npz",
+        "sha256": "5fd1c8c525c5c818f6566a1391054d3b451a48deba48255e6be395706224b09b",
+        "size_bytes": 376889,
+        "t_max_ms": 7999.05,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_004.npz",
+        "num_events": 57806,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_004.npz",
+        "sha256": "b60f5613ba039b7a03dee435560dc84aeb8b007ca8aca1f560330453673dd4e5",
+        "size_bytes": 917672,
+        "t_max_ms": 7999.833,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_005.npz",
+        "num_events": 18365,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_005.npz",
+        "sha256": "1b224b4a2b6ee9ff99d554e7fd0c3545e418ebe16a2752e89802f2216a68a134",
+        "size_bytes": 307861,
+        "t_max_ms": 7999.862,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_006.npz",
+        "num_events": 44340,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_006.npz",
+        "sha256": "8006341afd06194713f973c220c549700cde2c8a4a354498f3565005d55ca59a",
+        "size_bytes": 645003,
+        "t_max_ms": 7999.7789999999995,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_007.npz",
+        "num_events": 44016,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_007.npz",
+        "sha256": "1c60c3d1a530e016b6cd28000fc9f606db27e300b213454de5dc2963e9631d6f",
+        "size_bytes": 637394,
+        "t_max_ms": 7998.348999999998,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_008.npz",
+        "num_events": 283969,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_008.npz",
+        "sha256": "7a825a71bf55d3aa194348475404fa0a87ce158821b8f4390f8748683697c5ab",
+        "size_bytes": 3705340,
+        "t_max_ms": 7999.954,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_009.npz",
+        "num_events": 21101,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_009.npz",
+        "sha256": "2691b79c37810f98fddd9f51012cbb18086b2684426e42a216a49aeee8353377",
+        "size_bytes": 353661,
+        "t_max_ms": 7999.281,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_010.npz",
+        "num_events": 18627,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_010.npz",
+        "sha256": "f8bbf943b8293bd199d7e8b1519ca45c31cdb31c211de047ee367f20a6b4a996",
+        "size_bytes": 315202,
+        "t_max_ms": 7999.517,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_011.npz",
+        "num_events": 18845,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_011.npz",
+        "sha256": "50399ebf5ca8123ee0b582477770a98b09f631c417aed7187a7e2fb79c2fb5f4",
+        "size_bytes": 318489,
+        "t_max_ms": 7999.585999999999,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_012.npz",
+        "num_events": 18170,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_012.npz",
+        "sha256": "544ca2453764160cbc136fcf5fd2a30b3c9490d7be0a019465ee54070250754f",
+        "size_bytes": 306449,
+        "t_max_ms": 7995.614,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_013.npz",
+        "num_events": 21728,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_013.npz",
+        "sha256": "fd2486e0764ba92c8a828b95b111cbc5ba5b91edf0025ca663a01aa17072f692",
+        "size_bytes": 369506,
+        "t_max_ms": 7995.886999999999,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_014.npz",
+        "num_events": 18683,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_014.npz",
+        "sha256": "3d2fe1f68cff5f03bd3e065cd7d258bbe326fc79378d31e7f2a966fc660a76ad",
+        "size_bytes": 318298,
+        "t_max_ms": 7999.704,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_015.npz",
+        "num_events": 38335,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_015.npz",
+        "sha256": "5f7c32153a624a4fbdd54c614f05bcd6bd8cb473e2e862a119b980a8afe0bcfd",
+        "size_bytes": 569177,
+        "t_max_ms": 7459.4749999999985,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_016.npz",
+        "num_events": 33890,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_016.npz",
+        "sha256": "17ff30869b4db4cfaae909b08a848ff53baa2a81c7b92975cf5deb2f95756bd5",
+        "size_bytes": 525998,
+        "t_max_ms": 7999.927000000001,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_017.npz",
+        "num_events": 37279,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_017.npz",
+        "sha256": "138982b335fb8cfe738375df4cd0efe6f85264e7ec9aeeda71d0e82065a425b7",
+        "size_bytes": 587562,
+        "t_max_ms": 7992.28,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_018.npz",
+        "num_events": 35991,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_018.npz",
+        "sha256": "87ac52ca420ee5f87907622ecf484ac1b56626dd66f17ededc7efd344ce2650e",
+        "size_bytes": 565134,
+        "t_max_ms": 7989.618999999999,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_019.npz",
+        "num_events": 8852,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_019.npz",
+        "sha256": "20762c3c109e242527823d31b4abaf73d4860c2f6c81855e597d1f44adec3135",
+        "size_bytes": 162860,
+        "t_max_ms": 7998.42,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_020.npz",
+        "num_events": 6521,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_020.npz",
+        "sha256": "a307589e2fa7ff08be5f5b07cfc692455be050671381fffb55a6f42797be072f",
+        "size_bytes": 122615,
+        "t_max_ms": 6517.9360000000015,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_021.npz",
+        "num_events": 5638,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_021.npz",
+        "sha256": "3f73aab3d6dcfcf2c61aa4f3d9c4f97490369aa137eb6d51794efba958358818",
+        "size_bytes": 107933,
+        "t_max_ms": 5200.7750000000015,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_022.npz",
+        "num_events": 602549,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_022.npz",
+        "sha256": "3b4231639d2991b31611b64b9f7ae1c6caf8c7c8d20b838ea677df6d05ec11a6",
+        "size_bytes": 9245779,
+        "t_max_ms": 7999.986999999999,
+        "t_min_ms": 0.0
+      },
+      {
+        "file_name": "test_023.npz",
+        "num_events": 620440,
+        "relative_path": "dataset/EV-UAV-dataset/test/test_023.npz",
+        "sha256": "7e9e5356ab418cf8c9f10fd60301719c4727c64216c0cc4326c4926b0992625a",
+        "size_bytes": 9470258,
+        "t_max_ms": 7999.985,
+        "t_min_ms": 0.0
+      }
+    ],
+    "inventory_sha256": "9d5246506afaadc1417d25558234c701eef68d87c6b3d34d8eb45b8c58433570",
+    "label_source": "evs_norm[:,4]_equals_ev.label",
+    "model_coordinate_array": "ev_loc",
+    "model_feature_array": "evs_norm",
+    "model_timestamp_source": "ev_loc[:,2]_equals_floor(ev.t)",
+    "name": "EVUAV",
+    "raw_event_array": "ev",
+    "response_timestamp_source": "ev.t_float64_ms",
+    "root": "dataset/EV-UAV-dataset",
+    "sample_count": 24,
+    "split": "test",
+    "stream_duration_ms": 8000.0,
+    "total_events": 2074586,
+    "warmup": {
+      "formal_test_pass_still_exactly_once": true,
+      "relative_path": "dataset/EV-UAV-dataset/test/test_000.npz",
+      "sha256": "11aa3571d496f18b9ca07e33dccdb5bc7ddcd914dd485bea183b3cb53d33f39b",
+      "state_reset_after_warmup": true,
+      "timed": false
+    }
+  },
+  "format_version": 1,
+  "legacy_manifest": {
+    "note": "Retained only as supplied-directory provenance; its mixed best_iou/best_loss selection is not used by this Runtime study.",
+    "path": "save_model/grid_mamba/ablation_window_size/selected_weights_manifest.json",
+    "sha256": "dd93d6f763c0a97c5e6814c095306d7f7a9d392a7d94a7629a2f825a657b8c78",
+    "used_for_checkpoint_choice": false
+  },
+  "protocol_id": "evuav_window_scaled_temporal_hierarchy_runtime_v1",
+  "runtime_protocol_frozen_for_later_stages": {
+    "batch_size": 1,
+    "checkpoint_load_timed": false,
+    "cpu_threads": 1,
+    "experiment_variable_name": "window_scaled_temporal_hierarchy",
+    "formal_inference_passes_per_sample": 1,
+    "npz_io_timed": false,
+    "performance_and_runtime_from_same_pass": true,
+    "precision": "fp32",
+    "target_test_best_name": "target_test_oracle_best_iou",
+    "tf32": false,
+    "threshold_scan_timed": false,
+    "warmup_timed": false,
+    "writes_raw_predictions": false
+  },
+  "stage": "runtime_asset_lock",
+  "study_name": "Grid Mamba window-scaled temporal hierarchy",
+  "supplied_experiment_directory": "save_model/grid_mamba/ablation_window_size",
+  "variants": [
+    {
+      "checkpoint": {
+        "id": "best_iou",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W50_FULL/best_iou_seed37.pt",
+        "selection": "EVUAV validation IoU",
+        "sha256": "219af48f3d6dd80a61d94cfb91165d625c1429264068345adc3ca06a3610a7c1",
+        "size_bytes": 7469654
+      },
+      "config": {
+        "local_mamba_checkpoint_policy": "always",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W50_FULL/train_config.yaml",
+        "scale_strides": [
+          [
+            24.0,
+            24.0,
+            50.0
+          ],
+          [
+            48.0,
+            48.0,
+            50.0
+          ],
+          [
+            128.0,
+            128.0,
+            50.0
+          ]
+        ],
+        "sha256": "ef7faf45436d7b5cf5d71cafc941400b712ed6d7066bacf633ec4828b0a059ad",
+        "size_bytes": 4033,
+        "use_sparse_conv_encoder": true,
+        "use_spatial_window_context": true,
+        "use_stream_mamba_checkpoint": true,
+        "use_ts_embedding": false,
+        "window_size": 50.0
+      },
+      "experiment_dir": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W50_FULL",
+      "experiment_identity": {
+        "configured_group": "window_size_curve_no_trunc",
+        "configured_id": "SC12_GS_G4_FINE_LOW_MID_W50_FULL",
+        "configured_name": "sc12_gs_g4_fine_low_mid_w50_full_bptt",
+        "configured_source": "save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/train_config.yaml",
+        "configured_training_output": "save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W50_FULL",
+        "user_supplied_directory_retained": true
+      },
+      "id": "w50",
+      "model_probe": {
+        "all_parameters_finite": true,
+        "device": "cpu",
+        "model_parameters": 1858037,
+        "state_dict_keys": 96,
+        "state_dict_parameters": 1858037,
+        "state_signature_sha256": "0c615d2d2dbbd9cb34f96286ab16bd505a96ba215f9c0016f517e8f4681dbb0a",
+        "strict_load": true
+      },
+      "schedule": {
+        "empty_window_policy": "retain_tick_no_event_latency_state_unchanged",
+        "expected_scheduled_updates": 160,
+        "final_window_duration_ms": 50.0,
+        "has_partial_final_window": false,
+        "input_unit": "all_original_events_in_fixed_duration_window",
+        "nominal_update_frequency_hz": 20.0,
+        "realized_finite_stream_frequency_hz": 20.0,
+        "scheduling": "fixed_duration_chunk_zero",
+        "window_ms": 50.0
+      },
+      "window_ms": 50
+    },
+    {
+      "checkpoint": {
+        "id": "best_iou",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W100_FULL/best_iou_seed37.pt",
+        "selection": "EVUAV validation IoU",
+        "sha256": "62dc4fe0d004046ec96fb24ac6cc05aa5a93f2a99bcd7bb05950a76f84bfd3d9",
+        "size_bytes": 7469654
+      },
+      "config": {
+        "local_mamba_checkpoint_policy": "always",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W100_FULL/train_config.yaml",
+        "scale_strides": [
+          [
+            24.0,
+            24.0,
+            50.0
+          ],
+          [
+            48.0,
+            48.0,
+            50.0
+          ],
+          [
+            128.0,
+            128.0,
+            100.0
+          ]
+        ],
+        "sha256": "3932f53a7a3b901254e6601812e8fa9c89d9f9a157068dade13d7e003470d314",
+        "size_bytes": 4039,
+        "use_sparse_conv_encoder": true,
+        "use_spatial_window_context": true,
+        "use_stream_mamba_checkpoint": true,
+        "use_ts_embedding": false,
+        "window_size": 100.0
+      },
+      "experiment_dir": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W100_FULL",
+      "experiment_identity": {
+        "configured_group": "window_size_curve_no_trunc",
+        "configured_id": "SC12_GS_G4_FINE_LOW_MID_W100_FULL",
+        "configured_name": "sc12_gs_g4_fine_low_mid_w100_full_bptt",
+        "configured_source": "save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/train_config.yaml",
+        "configured_training_output": "save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W100_FULL",
+        "user_supplied_directory_retained": true
+      },
+      "id": "w100",
+      "model_probe": {
+        "all_parameters_finite": true,
+        "device": "cpu",
+        "model_parameters": 1858037,
+        "state_dict_keys": 96,
+        "state_dict_parameters": 1858037,
+        "state_signature_sha256": "0c615d2d2dbbd9cb34f96286ab16bd505a96ba215f9c0016f517e8f4681dbb0a",
+        "strict_load": true
+      },
+      "schedule": {
+        "empty_window_policy": "retain_tick_no_event_latency_state_unchanged",
+        "expected_scheduled_updates": 80,
+        "final_window_duration_ms": 100.0,
+        "has_partial_final_window": false,
+        "input_unit": "all_original_events_in_fixed_duration_window",
+        "nominal_update_frequency_hz": 10.0,
+        "realized_finite_stream_frequency_hz": 10.0,
+        "scheduling": "fixed_duration_chunk_zero",
+        "window_ms": 100.0
+      },
+      "window_ms": 100
+    },
+    {
+      "checkpoint": {
+        "id": "best_iou",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W200_FULL/best_iou_seed37.pt",
+        "selection": "EVUAV validation IoU",
+        "sha256": "e64d3d049425b2fa9867cbc0a14bcba2eaab1a77830f71fad7d99d01d842468b",
+        "size_bytes": 7469654
+      },
+      "config": {
+        "local_mamba_checkpoint_policy": "always",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W200_FULL/train_config.yaml",
+        "scale_strides": [
+          [
+            24.0,
+            24.0,
+            50.0
+          ],
+          [
+            48.0,
+            48.0,
+            100.0
+          ],
+          [
+            128.0,
+            128.0,
+            200.0
+          ]
+        ],
+        "sha256": "8e9a74df2baaf248854aa9ec38f58fde2ddecb04f2c81c35b0bc17c9159d190a",
+        "size_bytes": 4039,
+        "use_sparse_conv_encoder": true,
+        "use_spatial_window_context": true,
+        "use_stream_mamba_checkpoint": true,
+        "use_ts_embedding": false,
+        "window_size": 200.0
+      },
+      "experiment_dir": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W200_FULL",
+      "experiment_identity": {
+        "configured_group": "window_size_curve_no_trunc",
+        "configured_id": "SC12_GS_G4_FINE_LOW_MID_W200_FULL",
+        "configured_name": "sc12_gs_g4_fine_low_mid_w200_full_bptt",
+        "configured_source": "save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/train_config.yaml",
+        "configured_training_output": "save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W200_FULL",
+        "user_supplied_directory_retained": true
+      },
+      "id": "w200",
+      "model_probe": {
+        "all_parameters_finite": true,
+        "device": "cpu",
+        "model_parameters": 1858037,
+        "state_dict_keys": 96,
+        "state_dict_parameters": 1858037,
+        "state_signature_sha256": "0c615d2d2dbbd9cb34f96286ab16bd505a96ba215f9c0016f517e8f4681dbb0a",
+        "strict_load": true
+      },
+      "schedule": {
+        "empty_window_policy": "retain_tick_no_event_latency_state_unchanged",
+        "expected_scheduled_updates": 40,
+        "final_window_duration_ms": 200.0,
+        "has_partial_final_window": false,
+        "input_unit": "all_original_events_in_fixed_duration_window",
+        "nominal_update_frequency_hz": 5.0,
+        "realized_finite_stream_frequency_hz": 5.0,
+        "scheduling": "fixed_duration_chunk_zero",
+        "window_ms": 200.0
+      },
+      "window_ms": 200
+    },
+    {
+      "checkpoint": {
+        "id": "best_iou",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W300_FULL/best_iou_seed37.pt",
+        "selection": "EVUAV validation IoU",
+        "sha256": "58641de017e8ef4643ce8e787250b323ad8317a7949ae37386c58f2d31205bd8",
+        "size_bytes": 7469654
+      },
+      "config": {
+        "local_mamba_checkpoint_policy": "always",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W300_FULL/train_config.yaml",
+        "scale_strides": [
+          [
+            24.0,
+            24.0,
+            75.0
+          ],
+          [
+            48.0,
+            48.0,
+            150.0
+          ],
+          [
+            128.0,
+            128.0,
+            300.0
+          ]
+        ],
+        "sha256": "8b6abe1f3ce54daceede5631fc22490b1742e858be390986b7b94956c78b4b25",
+        "size_bytes": 4061,
+        "use_sparse_conv_encoder": true,
+        "use_spatial_window_context": true,
+        "use_stream_mamba_checkpoint": true,
+        "use_ts_embedding": false,
+        "window_size": 300.0
+      },
+      "experiment_dir": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W300_FULL",
+      "experiment_identity": {
+        "configured_group": "window_size_curve_no_trunc",
+        "configured_id": "SC12_GS_G4_FINE_LOW_MID_W300_FULL",
+        "configured_name": "sc12_gs_g4_fine_low_mid_w300_full_bptt",
+        "configured_source": "save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/train_config.yaml",
+        "configured_training_output": "save_model/grid_mamba/ablation_window_size_curve_rerun2/SC12_GS_G4_FINE_LOW_MID_W300_FULL",
+        "user_supplied_directory_retained": true
+      },
+      "id": "w300",
+      "model_probe": {
+        "all_parameters_finite": true,
+        "device": "cpu",
+        "model_parameters": 1858037,
+        "state_dict_keys": 96,
+        "state_dict_parameters": 1858037,
+        "state_signature_sha256": "0c615d2d2dbbd9cb34f96286ab16bd505a96ba215f9c0016f517e8f4681dbb0a",
+        "strict_load": true
+      },
+      "schedule": {
+        "empty_window_policy": "retain_tick_no_event_latency_state_unchanged",
+        "expected_scheduled_updates": 27,
+        "final_window_duration_ms": 200.0,
+        "has_partial_final_window": true,
+        "input_unit": "all_original_events_in_fixed_duration_window",
+        "nominal_update_frequency_hz": 3.3333333333333335,
+        "realized_finite_stream_frequency_hz": 3.375,
+        "scheduling": "fixed_duration_chunk_zero",
+        "window_ms": 300.0
+      },
+      "window_ms": 300
+    },
+    {
+      "checkpoint": {
+        "id": "best_iou",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID/best_iou_seed37.pt",
+        "selection": "EVUAV validation IoU",
+        "sha256": "a6762424c9e9724c941640a710c5f7ff9f6ba9919c1111335109466856894396",
+        "size_bytes": 7469654
+      },
+      "config": {
+        "local_mamba_checkpoint_policy": "adaptive",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID/train_config.yaml",
+        "scale_strides": [
+          [
+            24.0,
+            24.0,
+            100.0
+          ],
+          [
+            48.0,
+            48.0,
+            200.0
+          ],
+          [
+            128.0,
+            128.0,
+            400.0
+          ]
+        ],
+        "sha256": "152f4f623016f40e02524443c99eee4660cdcdcb55d184a9d2d80b8d74f0ab94",
+        "size_bytes": 3767,
+        "use_sparse_conv_encoder": true,
+        "use_spatial_window_context": true,
+        "use_stream_mamba_checkpoint": false,
+        "use_ts_embedding": false,
+        "window_size": 400.0
+      },
+      "experiment_dir": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID",
+      "experiment_identity": {
+        "configured_group": "grid_spatial_stride",
+        "configured_id": "SC12_GS_G4_FINE_LOW_MID",
+        "configured_name": "sparse_conv_gdsc_v1_1_4_d1_2_3_4_se_gs_g4_fine_low_mid",
+        "configured_source": "configs/evisseg_evuav.yaml",
+        "configured_training_output": "save_model/grid_mamba/ablation_sparse_conv_fixed50/SC12_GS_G4_FINE_LOW_MID",
+        "user_supplied_directory_retained": true
+      },
+      "id": "w400",
+      "model_probe": {
+        "all_parameters_finite": true,
+        "device": "cpu",
+        "model_parameters": 1858037,
+        "state_dict_keys": 96,
+        "state_dict_parameters": 1858037,
+        "state_signature_sha256": "0c615d2d2dbbd9cb34f96286ab16bd505a96ba215f9c0016f517e8f4681dbb0a",
+        "strict_load": true
+      },
+      "schedule": {
+        "empty_window_policy": "retain_tick_no_event_latency_state_unchanged",
+        "expected_scheduled_updates": 20,
+        "final_window_duration_ms": 400.0,
+        "has_partial_final_window": false,
+        "input_unit": "all_original_events_in_fixed_duration_window",
+        "nominal_update_frequency_hz": 2.5,
+        "realized_finite_stream_frequency_hz": 2.5,
+        "scheduling": "fixed_duration_chunk_zero",
+        "window_ms": 400.0
+      },
+      "window_ms": 400
+    },
+    {
+      "checkpoint": {
+        "id": "best_iou",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W800_FULL/best_iou_seed37.pt",
+        "selection": "EVUAV validation IoU",
+        "sha256": "35b0d147ec0c8356824144abd7e740fd5ef97e401ca49b1cd675eee7d667cab5",
+        "size_bytes": 7469654
+      },
+      "config": {
+        "local_mamba_checkpoint_policy": "always",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W800_FULL/train_config.yaml",
+        "scale_strides": [
+          [
+            24.0,
+            24.0,
+            200.0
+          ],
+          [
+            48.0,
+            48.0,
+            400.0
+          ],
+          [
+            128.0,
+            128.0,
+            800.0
+          ]
+        ],
+        "sha256": "f9057a96504db4e54e8b99332d9d662c5c22c052513ecbe20b613d0a3a6f6015",
+        "size_bytes": 4041,
+        "use_sparse_conv_encoder": true,
+        "use_spatial_window_context": true,
+        "use_stream_mamba_checkpoint": true,
+        "use_ts_embedding": false,
+        "window_size": 800.0
+      },
+      "experiment_dir": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W800_FULL",
+      "experiment_identity": {
+        "configured_group": "window_size_curve_no_trunc",
+        "configured_id": "SC12_GS_G4_FINE_LOW_MID_W800_FULL",
+        "configured_name": "sc12_gs_g4_fine_low_mid_w800_full_bptt",
+        "configured_source": "save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/train_config.yaml",
+        "configured_training_output": "save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W800_FULL",
+        "user_supplied_directory_retained": true
+      },
+      "id": "w800",
+      "model_probe": {
+        "all_parameters_finite": true,
+        "device": "cpu",
+        "model_parameters": 1858037,
+        "state_dict_keys": 96,
+        "state_dict_parameters": 1858037,
+        "state_signature_sha256": "0c615d2d2dbbd9cb34f96286ab16bd505a96ba215f9c0016f517e8f4681dbb0a",
+        "strict_load": true
+      },
+      "schedule": {
+        "empty_window_policy": "retain_tick_no_event_latency_state_unchanged",
+        "expected_scheduled_updates": 10,
+        "final_window_duration_ms": 800.0,
+        "has_partial_final_window": false,
+        "input_unit": "all_original_events_in_fixed_duration_window",
+        "nominal_update_frequency_hz": 1.25,
+        "realized_finite_stream_frequency_hz": 1.25,
+        "scheduling": "fixed_duration_chunk_zero",
+        "window_ms": 800.0
+      },
+      "window_ms": 800
+    },
+    {
+      "checkpoint": {
+        "id": "best_iou",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W1600_FULL/best_iou_seed37.pt",
+        "selection": "EVUAV validation IoU",
+        "sha256": "7749ca7ce09b81b2dfc2e8f5271a911cd21426854df338affadd04d0645be773",
+        "size_bytes": 7469654
+      },
+      "config": {
+        "local_mamba_checkpoint_policy": "always",
+        "path": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W1600_FULL/train_config.yaml",
+        "scale_strides": [
+          [
+            24.0,
+            24.0,
+            400.0
+          ],
+          [
+            48.0,
+            48.0,
+            800.0
+          ],
+          [
+            128.0,
+            128.0,
+            1600.0
+          ]
+        ],
+        "sha256": "ab9e40f0b3d28c480310b2558952a2de231563291b33845d5c073ccc8a004a06",
+        "size_bytes": 4048,
+        "use_sparse_conv_encoder": true,
+        "use_spatial_window_context": true,
+        "use_stream_mamba_checkpoint": true,
+        "use_ts_embedding": false,
+        "window_size": 1600.0
+      },
+      "experiment_dir": "save_model/grid_mamba/ablation_window_size/SC12_GS_G4_FINE_LOW_MID_W1600_FULL",
+      "experiment_identity": {
+        "configured_group": "window_size_curve_no_trunc",
+        "configured_id": "SC12_GS_G4_FINE_LOW_MID_W1600_FULL",
+        "configured_name": "sc12_gs_g4_fine_low_mid_w1600_full_bptt",
+        "configured_source": "save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID/train_config.yaml",
+        "configured_training_output": "save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W1600_FULL",
+        "user_supplied_directory_retained": true
+      },
+      "id": "w1600",
+      "model_probe": {
+        "all_parameters_finite": true,
+        "device": "cpu",
+        "model_parameters": 1858037,
+        "state_dict_keys": 96,
+        "state_dict_parameters": 1858037,
+        "state_signature_sha256": "0c615d2d2dbbd9cb34f96286ab16bd505a96ba215f9c0016f517e8f4681dbb0a",
+        "strict_load": true
+      },
+      "schedule": {
+        "empty_window_policy": "retain_tick_no_event_latency_state_unchanged",
+        "expected_scheduled_updates": 5,
+        "final_window_duration_ms": 1600.0,
+        "has_partial_final_window": false,
+        "input_unit": "all_original_events_in_fixed_duration_window",
+        "nominal_update_frequency_hz": 0.625,
+        "realized_finite_stream_frequency_hz": 0.625,
+        "scheduling": "fixed_duration_chunk_zero",
+        "window_ms": 1600.0
+      },
+      "window_ms": 1600
+    }
+  ]
+}

@@ -36,7 +36,6 @@ def stream_predict_full_sample(
     window_size: float,
     amp_enabled: bool,
     amp_dtype: torch.dtype,
-    knn_cache_key=None,
 ) -> torch.Tensor:
     """Predict every event while keeping full-sample storage on the CPU.
 
@@ -65,8 +64,7 @@ def stream_predict_full_sample(
 
     logits = torch.empty(points.size(0), dtype=torch.float32)
     spatial_state = None
-    stream_step = 0
-    for window_id, start, end in _window_ranges(
+    for _, start, end in _window_ranges(
         sorted_points[:, 2].contiguous(),
         window_size,
     ):
@@ -83,8 +81,6 @@ def stream_predict_full_sample(
             window_logits, spatial_state = model.forward_stream_window(
                 window_points,
                 prev_state=spatial_state,
-                knn_cache_key=knn_cache_key,
-                window_id=stream_step,
             )
         window_logits = window_logits.float().cpu()
         if sort_idx is None:
@@ -97,7 +93,6 @@ def stream_predict_full_sample(
             )
 
         del window_points, window_logits
-        stream_step += 1
 
         if device.type == "cuda":
             torch.cuda.empty_cache()

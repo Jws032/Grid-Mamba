@@ -76,13 +76,6 @@ def build_dataset(mode):
     raise ValueError(f"Unsupported dataset_name: {dataset_name}")
 
 
-def get_single_knn_cache_key(batch):
-    keys = batch.get("knn_cache_key")
-    if isinstance(keys, (list, tuple)) and len(keys) == 1:
-        return keys[0]
-    return None
-
-
 def latest_train_state_path(seed):
     return os.path.join(cfg.model_save_root, f"latest_train_state_seed{seed}.pt")
 
@@ -338,7 +331,9 @@ if __name__ == '__main__':
     scheduler = build_scheduler(optimizer)
 
     best_loss = 1e5
-    best_iou = 0
+    # The first valid validation result must establish a checkpoint even when
+    # its IoU is exactly zero (common in short smoke/runtime-only training).
+    best_iou = float("-inf")
 
     # ===== early stopping =====
     use_early_stopping = bool(getattr(cfg, 'early_stopping', True))
@@ -418,7 +413,6 @@ if __name__ == '__main__':
         for batch_idx, ev in enumerate(train_iter):
             points = ev['points'].float().to(device, non_blocking=True)
             label = ev['seg_label'].float().to(device, non_blocking=True)
-            knn_cache_key = get_single_knn_cache_key(ev)
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -429,7 +423,6 @@ if __name__ == '__main__':
                 chunk_iter = net.iter_forward_window_chunks(
                     points,
                     chunk_size=train_window_backward_chunk_size,
-                    knn_cache_key=knn_cache_key,
                 )
 
                 while True:
@@ -475,7 +468,7 @@ if __name__ == '__main__':
                     dtype=amp_dtype,
                     enabled=use_amp,
                 ):
-                    preds, _ = net(points, knn_cache_key=knn_cache_key)
+                    preds, _ = net(points)
 
                 # ===== NaN 检查 =====
                 if torch.isnan(preds).any() or torch.isinf(preds).any():
@@ -555,7 +548,6 @@ if __name__ == '__main__':
             for sample, ev in enumerate(val_iter):
                 points_cpu = ev['points'].float()
                 label_cpu = ev['seg_label'].float()
-                knn_cache_key = get_single_knn_cache_key(ev)
 
                 if bool(getattr(cfg, "validation_streaming", False)):
                     preds_cpu = stream_predict_full_sample(
@@ -565,7 +557,6 @@ if __name__ == '__main__':
                         window_size=float(cfg.window_size),
                         amp_enabled=use_amp,
                         amp_dtype=amp_dtype,
-                        knn_cache_key=knn_cache_key,
                     )
                     loss = compute_cpu_validation_loss(preds_cpu, label_cpu)
                 else:
@@ -576,7 +567,7 @@ if __name__ == '__main__':
                         dtype=amp_dtype,
                         enabled=use_amp,
                     ):
-                        preds, _ = net(points, knn_cache_key=knn_cache_key)
+                        preds, _ = net(points)
                     preds_cpu = preds.float().cpu()
                     loss = compute_loss(preds, label, loss_fn)
 
