@@ -39,4 +39,16 @@ nonselected_visualization_bundle	artifacts/evuav_track_visualization	3534686	pap
 subtotal_before_dependency_cleanup	-	8213725918	approximately 8.21 GB
 local_dependency_cache	whl	447381114	binary compatibility recorded in docs/环境依赖版本记录.md
 unused_analysis_tool	tools/analysis/ev_flying/visualize_ev_flying_fail_cases.py	16076	no retained generated assets; user-authorized deletion
-total	-	8661123108	approximately 8.66 GB
+subtotal_before_target_fred_cleanup	-	8661123108	约 8.66 GB
+failed	target:grid_mamba_stream/save_model/grid_mamba/fred_segmentation_area1250/ev_flying_config	37388905	第 1 epoch 的 101/650 处中断
+interrupted	target:grid_mamba_stream/save_model/grid_mamba/fred_segmentation_area1250/ev_flying_config_exact_full_eval	60078968	第 33 epoch 的 188/650 处中断
+failed_log	target:grid_mamba_stream/fred_area1250_train.log	163986	对应已删除的早期 area1250 训练
+interrupted_log	target:grid_mamba_stream/fred_area1250_exact_full_eval_train.log	4857067	对应已删除的中断 area1250 训练
+unreproducible_development	target:grid_mamba_stream/save_model/grid_mamba/fred_ablation/FRED_SC12_GS_SCALED_CROP800_FT_1E	91553465	无法从代码或 Git 历史验证 Crop800 实现
+unreproducible_development	target:grid_mamba_stream/save_model/grid_mamba/fred_ablation/FRED_SC12_GS_SCALED_CROP800_FT_5E_LR5E5_FROM3E	38567633	无法验证 Crop800 实现，且完整 FRED test 未完成
+failed	target:grid_mamba_stream/save_model/grid_mamba/cross_dataset/ev_flying_ef45_to_fred_full_6e50c985	204368	在 434/529 处 CUDA OOM，保留完整分块结果
+subtotal_before_fred_centralization	-	8893937500	约 8.89 GB
+duplicate	primary:experiments/runs/cross_dataset/EF45_to_FRED/source_checkpoint/ef45_best_iou_seed37_6e50c985.pt	7469654	与正式 EF45 best_iou 字节完全一致，改用唯一规范实体
+nonselected_fred_analysis	experiments/analysis/fred/label_audit	8156214	用户筛选后仅保留 bbox_stats 与 rgb_event_compare
+nonselected_fred_analysis	experiments/analysis/fred/rgb_bbox_audit	37527071	用户筛选后仅保留 bbox_stats 与 rgb_event_compare
+total	-	8947090439	约 8.95 GB

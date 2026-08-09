@@ -16,12 +16,19 @@ import time
 from types import SimpleNamespace
 from typing import Any, Dict, Mapping, Optional
 
+# 兼容两种正式调用方式：
+#   python -m tools.experiments.fred.run_fred_ablation
+#   python tools/experiments/fred/run_fred_ablation.py
+# 直接按文件运行时，Python 只会把脚本所在目录加入 sys.path，因此需要先把
+# 仓库根目录加入模块搜索路径，随后才能导入 tools._paths。
+_BOOTSTRAP_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_BOOTSTRAP_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BOOTSTRAP_REPO_ROOT))
+
 import yaml
 
-
 from tools._paths import GRID_MAMBA_ROOT as REPO_ROOT
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+
 BASE_CONFIG = REPO_ROOT / "configs" / "evisseg_fred.yaml"
 DEFAULT_OUTPUT_ROOT = (
     REPO_ROOT / "experiments" / "runs" / "fred" / "ablation"

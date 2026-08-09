@@ -1,3 +1,5 @@
+"""对 EV-Flying 原始事件执行离线热像素过滤。"""
+
 import argparse
 import json
 import os

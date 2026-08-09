@@ -7,6 +7,14 @@ canonical_assets:
     path: experiments/runs/evuav/baseline/FULL_SC12
     legacy_path: save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID
     status: canonical
+    instance_segmentation_evaluation:
+      path: test_best_iou/track_grid_search_thr0p730_81/instance_segmentation_eval
+      AP: 0.5443115053122638
+      AP50: 0.76563936478138
+      AP75: 0.5291791920684683
+      mCov: 0.7301168130525495
+      mWCov: 0.796557108506926
+      note: 论文 Discussion 采用的轨迹级实例分割正式评测。
 
   evuav_hlc2:
     path: experiments/runs/evuav/ablation/hlc2
@@ -44,6 +52,47 @@ canonical_assets:
     path: experiments/runs/ev_flying/baseline/EF45
     status: canonical
 
+  fred_sc12_gs_scaled:
+    path: experiments/runs/fred/ablation/FRED_SC12_GS_SCALED
+    legacy_path: save_model/grid_mamba/fred_ablation/FRED_SC12_GS_SCALED
+    status: canonical
+    storage: primary_server_only
+    recursive_sha256: 4e92b8c0f1a97e95da73f9f1d27f3111d38efae527324f9c720350dbe2f60c9d
+    note: 目标服务器上完成 50 epoch 的正式 FRED 实验；同一正式实验内部资产完整保留。
+
+  ef45_to_fred:
+    path: experiments/runs/cross_dataset/EF45_to_FRED
+    status: canonical
+    storage: primary_server_only
+    recursive_sha256: 2e2e4f16775455d2f42e24c10ce6f2ae45ff9b4f75f0c0df2867f132bc16d9d7
+    source_checkpoint: experiments/runs/ev_flying/baseline/EF45/best_iou_seed37.pt
+    source_checkpoint_sha256: 6e50c9854d82151441c584e6136d893f0580050380e754727b08f47816284ba7
+    final_run: final/fred_full
+    final_selection:
+      protocol: target_test_best_iou
+      threshold: 0.03
+      IoU: 0.6351188166915522
+      Acc: 0.6989575908882941
+      Pd: 0.877816680891828
+      Fa: 0.14464613215911334
+      samples: 529
+      events: 2516672665
+    comparisons:
+      area1250_full: comparisons/area1250_full
+      area1250_sample700k: comparisons/area1250_sample700k
+    note: EF45 零样本迁移到 FRED；fred_full 为最终采用结果，两组 area1250 仅作为对照。
+
+  dataset_statistics:
+    path: experiments/analysis/dataset_stats
+    status: canonical
+    storage: primary_server_only
+    groups:
+      fred_evuav: experiments/analysis/dataset_stats/fred_evuav
+      ev_flying_raw_hf: experiments/analysis/dataset_stats/ev_flying_raw_hf
+    generator:
+      ev_flying_raw_hf: tools/analysis/ev_flying/stat_ev_flying_raw_hf.py
+    note: 目标服务器工作区清理前保留的数据规模、目标事件比例和边界框统计；不参与模型训练或论文数值更新。
+
 external_references:
   hlc2_experiment_registry:
     path: docs/HLC2_Ablation_Experiment_Registry.md
@@ -74,6 +123,12 @@ analysis_cleanup:
   deleted_bytes: 3344182743
   retained_swc_source: experiments/analysis/swc_temporal/evuav/test_020_w09_15
   retained_swc_windows: [9, 10, 11, 12, 13, 14, 15]
+  retained_fred_analysis:
+    - experiments/analysis/fred/bbox_stats
+    - experiments/analysis/fred/rgb_event_compare
+  retained_dataset_statistics:
+    - experiments/analysis/dataset_stats/fred_evuav
+    - experiments/analysis/dataset_stats/ev_flying_raw_hf
   filesystem_aliases: false
   audit: experiments/registry/migration_manifest.tsv
 

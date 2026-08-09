@@ -16,7 +16,8 @@ python -m tools.runtime.evuav_window.run_evuav_window_size_runtime preflight all
 - `runtime/`：数据集级运行时间评测、EVUAV 因果窗口 Runtime 及 FRED
   适配器。
 - `evaluation/tracking/`：EVUAV 轨迹构建、参数搜索和实例级指标评测。
-- `analysis/`：保留正式 SWC 数据生成工具，不定义正式训练结果。
+- `analysis/`：保留正式 SWC/FRED 分析工具，以及原始 EV-Flying 数据统计
+  工具；不定义正式训练结果。
 
 Runtime 测试位于 `tests/tools/runtime/`。自动生成的 `__pycache__` 不属于
 实验资产，不应保留。

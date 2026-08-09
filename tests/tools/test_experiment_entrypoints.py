@@ -39,6 +39,29 @@ class ExperimentEntrypointTests(unittest.TestCase):
             "assert set(r.EV_FLYING_EXPERIMENTS) == {'EF45'}"
         )
 
+    def test_fred_registry_only_contains_formal_experiment(self) -> None:
+        self.run_probe(
+            "from tools.experiments.fred import run_fred_ablation as r; "
+            "assert set(r.EXPERIMENTS) == {'FRED_SC12_GS_SCALED'}; "
+            "assert r.DEFAULT_OUTPUT_ROOT == r.REPO_ROOT / 'experiments' / "
+            "'runs' / 'fred' / 'ablation'"
+        )
+
+    def test_fred_entrypoint_supports_direct_file_execution(self) -> None:
+        script = REPO_ROOT / "tools" / "experiments" / "fred" / "run_fred_ablation.py"
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+
     def test_fixed50_registry_only_contains_full_sc12(self) -> None:
         self.run_probe(
             "from tools.experiments.evuav import run_fixed50_sc4_sc12 as r; "

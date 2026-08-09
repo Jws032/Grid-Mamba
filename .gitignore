@@ -16,6 +16,7 @@ lib/hais_ops/build/
 lib/hais_ops/HAIS_OP*.so
 model/Grid_Mamba/__pycache__
 whl/
+tools/hdf5_ecf/plugin/*.so
 
 point_level_eval.csv
 predictions.txt

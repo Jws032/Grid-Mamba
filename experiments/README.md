@@ -7,8 +7,9 @@
 
 - `registry/`：受版本控制的实验元数据、别名、协议和迁移记录。
 - `runs/`：正式训练、测试、预测及 Runtime 资产。
-- `analysis/`：只保留论文 SWC 正式来源
-  `swc_temporal/evuav/test_020_w09_15/`；开发期分析产物已删除。
+- `analysis/`：保留论文 SWC 正式来源
+  `swc_temporal/evuav/test_020_w09_15/`、筛选后的 FRED 分析资产，以及从
+  目标服务器收口的数据集统计结果；开发期分析产物已删除。
 - `figures/generated/`：自动生成的预览图；论文正式图仍保存在工作区级
   `latex/` 项目中。
 - `portable_artifacts/`：体积较小且不可变的锁文件和索引。仓库级

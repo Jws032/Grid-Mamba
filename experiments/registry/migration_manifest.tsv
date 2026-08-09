@@ -56,3 +56,32 @@ delete	unused_comparison_bundle	artifacts/evuav_instance_comparison	-none-	legac
 delete	nonselected_visualization_bundle	artifacts/evuav_track_visualization	../latex/figures/instance_segmentation_discussion/evuav_track_visualization	paper-selected test_014 inputs and renderer are self-contained in the frozen paper project
 delete	local_dependency_cache	whl	docs/环境依赖版本记录.md	installed environment compatibility recorded before deleting ignored local wheel cache
 delete	unused_analysis_tool	tools/analysis/ev_flying/visualize_ev_flying_fail_cases.py	-none-	no retained generated assets; explicitly approved for deletion
+delete	failed	target:grid_mamba_stream/save_model/grid_mamba/fred_segmentation_area1250/ev_flying_config	-none-	第 1 epoch 的 101/650 处中断，无完成标记
+delete	interrupted	target:grid_mamba_stream/save_model/grid_mamba/fred_segmentation_area1250/ev_flying_config_exact_full_eval	-none-	第 33 epoch 的 188/650 处中断，无完成标记
+delete	failed_log	target:grid_mamba_stream/fred_area1250*_train.log	-none-	对应已删除的失败和中断 area1250 训练
+delete	unreproducible_development	target:grid_mamba_stream/save_model/grid_mamba/fred_ablation/FRED_SC12_GS_SCALED_CROP800_FT_1E	-none-	Crop800 配置项在当前代码及 Git 历史中无可验证实现
+delete	unreproducible_development	target:grid_mamba_stream/save_model/grid_mamba/fred_ablation/FRED_SC12_GS_SCALED_CROP800_FT_5E_LR5E5_FROM3E	-none-	第二阶段完整 FRED test 未完成，且 Crop800 语义不可复现
+delete	failed	target:grid_mamba_stream/save_model/grid_mamba/cross_dataset/ev_flying_ef45_to_fred_full_6e50c985	-none-	运行到 434/529 时 CUDA OOM，由完整分块版本替代
+move	canonical	target:grid_mamba_stream/save_model/grid_mamba/fred_ablation/FRED_SC12_GS_SCALED	experiments/runs/fred/ablation/FRED_SC12_GS_SCALED	完成 50 epoch 的正式 FRED 实验，递归摘要校验一致
+move	canonical_input	target:grid_mamba_stream/save_model/grid_mamba/cross_dataset/checkpoints/ef45_best_iou_seed37_6e50c985.pt	experiments/runs/cross_dataset/EF45_to_FRED/source_checkpoint/ef45_best_iou_seed37_6e50c985.pt	EF45 正式 best_iou 来源模型，SHA-256 为 6e50c985...
+move	canonical	target:grid_mamba_stream/save_model/grid_mamba/cross_dataset/ev_flying_ef45_to_fred_full_6e50c985_chunked_resume	experiments/runs/cross_dataset/EF45_to_FRED/final/fred_full	论文最终采用的完整 FRED 零样本跨域结果，IoU 63.51%、Acc 69.90%
+move	comparison	target:grid_mamba_stream/save_model/grid_mamba/cross_dataset/ev_flying_ef45_to_fred_area1250_full_6e50c985	experiments/runs/cross_dataset/EF45_to_FRED/comparisons/area1250_full	area1250 小目标子集全事件对照
+move	comparison	target:grid_mamba_stream/save_model/grid_mamba/cross_dataset/ev_flying_ef45_to_fred_area1250_sample700k_seed37_6e50c985	experiments/runs/cross_dataset/EF45_to_FRED/comparisons/area1250_sample700k	area1250 每样本最多 70 万事件对照
+move	canonical_consolidation	target:Grid_Mamba_GitHub/experiments/runs/fred/ablation/FRED_SC12_GS_SCALED	primary:experiments/runs/fred/ablation/FRED_SC12_GS_SCALED	集中到主服务器，60 个文件及递归 SHA-256 校验一致后删除目标服务器实体
+move	canonical_consolidation	target:Grid_Mamba_GitHub/experiments/runs/cross_dataset/EF45_to_FRED	primary:experiments/runs/cross_dataset/EF45_to_FRED	集中到主服务器，18 个文件及递归 SHA-256 校验一致后删除目标服务器实体
+delete	duplicate	primary:experiments/runs/cross_dataset/EF45_to_FRED/source_checkpoint/ef45_best_iou_seed37_6e50c985.pt	primary:experiments/runs/ev_flying/baseline/EF45/best_iou_seed37.pt	两者字节完全一致，跨数据集注册表改用正式 EF45 唯一实体
+move	canonical_evaluation	target:grid_mamba_stream/save_model/grid_mamba/ablation_sparse_conv_fixed50/SC12_GS_G4_FINE_LOW_MID/test_best_iou/track_grid_search_thr0p730_81/instance_segmentation_eval	experiments/runs/evuav/baseline/FULL_SC12/test_best_iou/track_grid_search_thr0p730_81/instance_segmentation_eval	论文采用的 7 个实例分割评测文件逐项 SHA-256 一致后删除远端源目录
+delete	nonselected_fred_analysis	experiments/analysis/fred/label_audit	-none-	迁移核验完成后按用户筛选删除，对应独立生成工具同步删除
+delete	nonselected_fred_analysis	experiments/analysis/fred/rgb_bbox_audit	-none-	迁移核验完成后按用户筛选删除，保留 RGB/event 对比所需精简公共模块
+move	dataset_statistics	target:artifacts/dataset_stats	experiments/analysis/dataset_stats/fred_evuav	FRED/EV-UAV 数据规模和分割统计逐文件校验一致后迁回主服务器
+move	dataset_statistics	target:diagnostics/dataset_event_target_stats/evuav_fred_summary.json	experiments/analysis/dataset_stats/fred_evuav/evuav_fred_summary.json	补充 FRED/EV-UAV 目标事件与边界框汇总
+move	dataset_statistics	target:diagnostics/dataset_event_target_stats/ev_flying_raw_hf_*	experiments/analysis/dataset_stats/ev_flying_raw_hf	Hugging Face 原始 EV-Flying 逐序列统计和汇总逐文件校验一致
+move	reproducibility_tool	target:scripts/stat_ev_flying_raw_hf.py	tools/analysis/ev_flying/stat_ev_flying_raw_hf.py	统计逻辑保持不变，默认路径改为主服务器共享 datasets 和规范分析目录
+delete	superseded_runtime	target:runtime_fred_full	-none-	旧全量 FRED 跨模型 Runtime 协议未被论文采用，Grid Mamba 底层结果已在正式 FRED 实验内保留
+delete	nonselected_visualization	target:visualizations	../latex/figures/qualitative_main	论文正式六样本的点云和三模型预测已逐文件核验，目标目录为候选库和旧版布局
+delete	duplicate_transfer_package	target:ev_flying_candidate_transfer_4	-none-	四样本包是六样本候选包的重复子集，且样本未进入论文正式图
+delete	nonselected_transfer_package	target:transfer_packages	-none-	六样本候选展开目录与压缩包均未进入论文正式图
+delete	development_diagnostics	target:diagnostics	-none-	保留的数据统计已迁出，其余为标签抽查和事件量区间预览图
+delete	development_logs	target:logs	-none-	删除传输日志和未被论文采用的 CETUS/SC4/KNN Dense 开发基准
+delete	development_scripts	target:scripts	-none-	正式预处理和统计工具已迁移，剩余脚本只生成已删除的候选、诊断和旧基准资产
+delete	development_tool	target:tools/summarize_fred_runtime.py	-none-	仅服务于已删除的旧全量 FRED Runtime 汇总；保留 tools/hdf5_ecf
