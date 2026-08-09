@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Run Grid Mamba ablation experiments end to end.
+"""Shared execution engine for the retained Grid Mamba experiment runners.
 
-This runner generates per-experiment configs, launches training/testing,
-runs the point-level evaluator, and summarizes the best IoU row.
+Dataset-specific entry points provide the experiment registry and configuration
+overrides.  This module only owns the common config, train, test, evaluation,
+failure-recording, and summary pipeline.
 """
 
 from __future__ import annotations
@@ -30,21 +31,11 @@ DEFAULT_CONFIG = REPO_ROOT / "configs" / "evisseg_evuav.yaml"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "experiments" / "runs" / "evuav" / "ablation" / "development"
 SEED = 37
 
-BASE_SCALE_STRIDES = [
-    [32.0, 32.0, 100.0],
-    [64.0, 64.0, 200.0],
-    [128.0, 128.0, 400.0],
-]
-
-FULL_GRID_MAMBA = {
-    "window_size": 400.0,
-    "use_grid_pos_encoding": True,
-    "use_spatial_window_context": True,
-    "use_temporal_cell_diffusion": True,
-    "spatial_context_use_conv": True,
-    "spatial_context_stride": 8.0,
-    "scale_strides": BASE_SCALE_STRIDES,
-}
+# These values are injected by the dataset-specific entry point before main().
+# Keeping the engine registry-free prevents obsolete development experiments
+# from being exposed as runnable targets.
+FULL_GRID_MAMBA: Dict[str, Any] = {}
+EXPERIMENTS: Dict[str, Dict[str, Any]] = {}
 
 
 def gm(**kwargs: Any) -> Dict[str, Dict[str, Any]]:
@@ -62,180 +53,6 @@ def merge_overrides(*items: Mapping[str, Mapping[str, Any]]) -> Dict[str, Dict[s
             merged.setdefault(section, {}).update(values)
     return merged
 
-
-EXPERIMENTS: Dict[str, Dict[str, Any]] = {
-    # SWC internals.
-    "S0": {
-        "group": "swc_internal",
-        "name": "no_swc",
-        "overrides": gm(
-            use_spatial_window_context=False,
-            use_temporal_cell_diffusion=False,
-            spatial_context_use_conv=False,
-        ),
-    },
-    "S1": {
-        "group": "swc_internal",
-        "name": "swc_mamba_only",
-        "overrides": gm(
-            use_spatial_window_context=True,
-            use_temporal_cell_diffusion=False,
-            spatial_context_use_conv=False,
-        ),
-    },
-    "S2": {
-        "group": "swc_internal",
-        "name": "swc_mamba_diffusion",
-        "overrides": gm(
-            use_spatial_window_context=True,
-            use_temporal_cell_diffusion=True,
-            spatial_context_use_conv=False,
-        ),
-    },
-    "S3": {
-        "group": "swc_internal",
-        "name": "full_swc",
-        "overrides": {},
-    },
-    # Multi-scale grid configuration.
-    "G0": {
-        "group": "grid_scale",
-        "name": "small",
-        "overrides": gm(scale_strides=[[32.0, 32.0, 100.0]]),
-    },
-    "G1": {
-        "group": "grid_scale",
-        "name": "medium",
-        "overrides": gm(scale_strides=[[64.0, 64.0, 200.0]]),
-    },
-    "G2": {
-        "group": "grid_scale",
-        "name": "large",
-        "overrides": gm(scale_strides=[[128.0, 128.0, 400.0]]),
-    },
-    "G3": {
-        "group": "grid_scale",
-        "name": "small_medium",
-        "overrides": gm(
-            scale_strides=[
-                [32.0, 32.0, 100.0],
-                [64.0, 64.0, 200.0],
-            ]
-        ),
-    },
-    "G4": {
-        "group": "grid_scale",
-        "name": "small_large",
-        "overrides": gm(
-            scale_strides=[
-                [32.0, 32.0, 100.0],
-                [128.0, 128.0, 400.0],
-            ]
-        ),
-    },
-    "G5": {
-        "group": "grid_scale",
-        "name": "medium_large",
-        "overrides": gm(
-            scale_strides=[
-                [64.0, 64.0, 200.0],
-                [128.0, 128.0, 400.0],
-            ]
-        ),
-    },
-    "G6": {
-        "group": "grid_scale",
-        "name": "full_multiscale",
-        "overrides": {},
-    },
-    # Window size x SWC.
-    "W0": {
-        "group": "window_swc",
-        "name": "100ms_no_swc",
-        "overrides": gm(
-            window_size=100.0,
-            use_spatial_window_context=False,
-            use_temporal_cell_diffusion=False,
-            spatial_context_use_conv=False,
-        ),
-    },
-    "W1": {
-        "group": "window_swc",
-        "name": "100ms_swc",
-        "overrides": gm(window_size=100.0),
-    },
-    "W2": {
-        "group": "window_swc",
-        "name": "200ms_no_swc",
-        "overrides": gm(
-            window_size=200.0,
-            use_spatial_window_context=False,
-            use_temporal_cell_diffusion=False,
-            spatial_context_use_conv=False,
-        ),
-    },
-    "W3": {
-        "group": "window_swc",
-        "name": "200ms_swc",
-        "overrides": gm(window_size=200.0),
-    },
-    "W4": {
-        "group": "window_swc",
-        "name": "400ms_no_swc",
-        "overrides": gm(
-            window_size=400.0,
-            use_spatial_window_context=False,
-            use_temporal_cell_diffusion=False,
-            spatial_context_use_conv=False,
-        ),
-    },
-    "W5": {
-        "group": "window_swc",
-        "name": "400ms_swc_full",
-        "overrides": {},
-    },
-    "W6": {
-        "group": "window_swc",
-        "name": "800ms_no_swc",
-        "overrides": gm(
-            window_size=800.0,
-            use_spatial_window_context=False,
-            use_temporal_cell_diffusion=False,
-            spatial_context_use_conv=False,
-        ),
-    },
-    "W7": {
-        "group": "window_swc",
-        "name": "800ms_swc",
-        "overrides": gm(window_size=800.0),
-    },
-    # Spatial context stride.
-    "C0": {
-        "group": "context_stride",
-        "name": "stride_4",
-        "overrides": gm(spatial_context_stride=4.0),
-    },
-    "C1": {
-        "group": "context_stride",
-        "name": "stride_8_full",
-        "overrides": {},
-    },
-    "C2": {
-        "group": "context_stride",
-        "name": "stride_16",
-        "overrides": gm(spatial_context_stride=16.0),
-    },
-    "C3": {
-        "group": "context_stride",
-        "name": "stride_32",
-        "overrides": gm(spatial_context_stride=32.0),
-    },
-    "C4": {
-        "group": "context_stride",
-        "name": "stride_64",
-        "overrides": gm(spatial_context_stride=64.0),
-    },
-}
 
 CHECKPOINTS = {
     "best_iou": f"best_iou_seed{SEED}.pt",
@@ -929,6 +746,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
+    if not EXPERIMENTS:
+        raise RuntimeError(
+            "run_ablation is a shared engine without a built-in experiment "
+            "registry; use a dataset-specific entry point under tools.experiments"
+        )
     if args.list:
         list_experiments(EXPERIMENTS.keys())
         return 0

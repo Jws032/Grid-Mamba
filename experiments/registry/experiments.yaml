@@ -11,22 +11,25 @@ canonical_assets:
   evuav_hlc2:
     path: experiments/runs/evuav/ablation/hlc2
     status: canonical
+    physical_layout: grouped_by_ablation_family
+    filesystem_aliases: false
     cp04_source: hlc2_paper_ablation_cp04_rerun1/CP04
 
   evuav_window_size:
     path: experiments/runs/evuav/window_size/formal
     status: canonical
+    filesystem_aliases: false
     selected_runs:
-      W025: SC12_GS_G4_FINE_LOW_MID_W25_FULL
-      W050: SC12_GS_G4_FINE_LOW_MID_W50_FULL
-      W100: SC12_GS_G4_FINE_LOW_MID_W100_FULL
-      W200: SC12_GS_G4_FINE_LOW_MID_W200_FULL
-      W300: SC12_GS_G4_FINE_LOW_MID_W300_FULL
+      W025: W025
+      W050: W050
+      W100: W100
+      W200: W200
+      W300: W300
       W400: ../../baseline/FULL_SC12
-      W800: SC12_GS_G4_FINE_LOW_MID_W800_FULL
-      W1600: SC12_GS_G4_FINE_LOW_MID_W1600_FULL
+      W800: W800
+      W1600: W1600
     w300_source: ablation_window_size_curve_rerun2
-    note: W25 is organized as an asset only; no paper files are modified.
+    note: Every trained window run uses its short Wxxx canonical directory. W400 maps to the shared full baseline. W25 is organized as an asset only; no paper files are modified.
 
   evuav_runtime_baseline:
     path: experiments/runs/evuav/runtime/baseline_common_v1
@@ -58,16 +61,43 @@ external_references:
     path: ../datasets
     policy: out_of_scope
 
-archived_assets:
-  superseded:
-    - experiments/archive_pending/superseded_runs/hlc2/CP04_original
-    - experiments/archive_pending/superseded_runs/window_size/W300_original
-    - experiments/archive_pending/superseded_runs/window_size/rerun1
-    - experiments/archive_pending/superseded_runs/window_size/W400_curve
-    - experiments/archive_pending/superseded_runs/window_size/win50_no_overlap
-  diagnostic:
-    - experiments/archive_pending/diagnostic_runs/ev_flying/EF53_50ms
-    - experiments/archive_pending/diagnostic_runs/ev_flying/EF54_25ms
-  legacy:
-    - experiments/archive_pending/legacy_runtime/window_size_full_sample
-    - experiments/archive_pending/tracking/mlruns_legacy
+archive_cleanup:
+  status: deleted
+  date: 2026-08-09
+  deleted_bytes: 2084870261
+  scope: superseded runs, diagnostic runs, legacy Runtime, and legacy MLflow tracking
+  audit: experiments/registry/migration_manifest.tsv
+
+analysis_cleanup:
+  status: completed
+  date: 2026-08-09
+  deleted_bytes: 3344182743
+  retained_swc_source: experiments/analysis/swc_temporal/evuav/test_020_w09_15
+  retained_swc_windows: [9, 10, 11, 12, 13, 14, 15]
+  filesystem_aliases: false
+  audit: experiments/registry/migration_manifest.tsv
+
+artifact_cleanup:
+  status: completed
+  date: 2026-08-09
+  deleted_bytes: 3554763
+  deleted_bundles:
+    - artifacts/evuav_instance_comparison
+    - artifacts/evuav_track_visualization
+  retained_runtime_manifests:
+    - artifacts/ev_flying.yaml
+    - artifacts/evuav.yaml
+  retained_runtime_lock_aliases: true
+  paper_copy: ../latex/figures/instance_segmentation_discussion/evuav_track_visualization
+  audit: experiments/registry/migration_manifest.tsv
+
+residual_cleanup:
+  status: completed
+  date: 2026-08-09
+  deleted_bytes: 447397190
+  deleted_paths:
+    - whl
+    - tools/analysis/ev_flying/visualize_ev_flying_fail_cases.py
+  environment_record: docs/环境依赖版本记录.md
+  retained_runtime_document: docs/事件模型计算效率与在线延迟评估说明_通用公式版.md
+  audit: experiments/registry/migration_manifest.tsv

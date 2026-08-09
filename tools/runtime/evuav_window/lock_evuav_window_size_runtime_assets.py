@@ -44,12 +44,24 @@ LOCK_PATH = (
 EXPERIMENT_ROOT = (
     REPO_ROOT / "experiments" / "runs" / "evuav" / "window_size" / "formal"
 )
+FULL_RUN_DIR = (
+    REPO_ROOT / "experiments" / "runs" / "evuav" / "baseline" / "FULL_SC12"
+)
+FULL_EXPERIMENT_ID = "SC12_GS_G4_FINE_LOW_MID"
 LEGACY_MANIFEST = EXPERIMENT_ROOT / "selected_weights_manifest.json"
 DATASET_ROOT = WORKSPACE_ROOT / "datasets" / "EV-UAV"
 LEGACY_DATASET_RECORD_ROOT = Path("dataset/EV-UAV-dataset")
 LEGACY_EXPERIMENT_RECORD_ROOT = Path(
     "save_model/grid_mamba/ablation_window_size"
 )
+LEGACY_WINDOW_DIRECTORY_NAMES = {
+    "W050": "SC12_GS_G4_FINE_LOW_MID_W50_FULL",
+    "W100": "SC12_GS_G4_FINE_LOW_MID_W100_FULL",
+    "W200": "SC12_GS_G4_FINE_LOW_MID_W200_FULL",
+    "W300": "SC12_GS_G4_FINE_LOW_MID_W300_FULL",
+    "W800": "SC12_GS_G4_FINE_LOW_MID_W800_FULL",
+    "W1600": "SC12_GS_G4_FINE_LOW_MID_W1600_FULL",
+}
 TEST_ROOT = DATASET_ROOT / "test"
 
 STREAM_DURATION_MS = 8_000.0
@@ -66,7 +78,7 @@ VARIANTS: Sequence[Mapping[str, Any]] = (
     {
         "id": "w50",
         "window_ms": 50,
-        "experiment_dir": "SC12_GS_G4_FINE_LOW_MID_W50_FULL",
+        "experiment_dir": "W050",
         "checkpoint_sha256": (
             "219af48f3d6dd80a61d94cfb91165d625c1429264068345adc3ca06a3610a7c1"
         ),
@@ -77,7 +89,7 @@ VARIANTS: Sequence[Mapping[str, Any]] = (
     {
         "id": "w100",
         "window_ms": 100,
-        "experiment_dir": "SC12_GS_G4_FINE_LOW_MID_W100_FULL",
+        "experiment_dir": "W100",
         "checkpoint_sha256": (
             "62dc4fe0d004046ec96fb24ac6cc05aa5a93f2a99bcd7bb05950a76f84bfd3d9"
         ),
@@ -88,7 +100,7 @@ VARIANTS: Sequence[Mapping[str, Any]] = (
     {
         "id": "w200",
         "window_ms": 200,
-        "experiment_dir": "SC12_GS_G4_FINE_LOW_MID_W200_FULL",
+        "experiment_dir": "W200",
         "checkpoint_sha256": (
             "e64d3d049425b2fa9867cbc0a14bcba2eaab1a77830f71fad7d99d01d842468b"
         ),
@@ -99,7 +111,7 @@ VARIANTS: Sequence[Mapping[str, Any]] = (
     {
         "id": "w300",
         "window_ms": 300,
-        "experiment_dir": "SC12_GS_G4_FINE_LOW_MID_W300_FULL",
+        "experiment_dir": "W300",
         "checkpoint_sha256": (
             "58641de017e8ef4643ce8e787250b323ad8317a7949ae37386c58f2d31205bd8"
         ),
@@ -110,7 +122,8 @@ VARIANTS: Sequence[Mapping[str, Any]] = (
     {
         "id": "w400",
         "window_ms": 400,
-        "experiment_dir": "SC12_GS_G4_FINE_LOW_MID",
+        "experiment_dir": FULL_EXPERIMENT_ID,
+        "canonical_run": "evuav_full",
         "checkpoint_sha256": (
             "a6762424c9e9724c941640a710c5f7ff9f6ba9919c1111335109466856894396"
         ),
@@ -121,7 +134,7 @@ VARIANTS: Sequence[Mapping[str, Any]] = (
     {
         "id": "w800",
         "window_ms": 800,
-        "experiment_dir": "SC12_GS_G4_FINE_LOW_MID_W800_FULL",
+        "experiment_dir": "W800",
         "checkpoint_sha256": (
             "35b0d147ec0c8356824144abd7e740fd5ef97e401ca49b1cd675eee7d667cab5"
         ),
@@ -132,7 +145,7 @@ VARIANTS: Sequence[Mapping[str, Any]] = (
     {
         "id": "w1600",
         "window_ms": 1600,
-        "experiment_dir": "SC12_GS_G4_FINE_LOW_MID_W1600_FULL",
+        "experiment_dir": "W1600",
         "checkpoint_sha256": (
             "7749ca7ce09b81b2dfc2e8f5271a911cd21426854df338affadd04d0645be773"
         ),
@@ -173,10 +186,25 @@ def relative_to_repo(path: Path) -> str:
 
     absolute = path.absolute()
     try:
+        full_relative = absolute.relative_to(FULL_RUN_DIR.absolute())
+    except ValueError:
+        pass
+    else:
+        return str(
+            LEGACY_EXPERIMENT_RECORD_ROOT / FULL_EXPERIMENT_ID / full_relative
+        )
+    try:
         experiment_relative = absolute.relative_to(EXPERIMENT_ROOT.absolute())
     except ValueError:
         pass
     else:
+        if (
+            experiment_relative.parts
+            and experiment_relative.parts[0] in LEGACY_WINDOW_DIRECTORY_NAMES
+        ):
+            experiment_relative = Path(
+                LEGACY_WINDOW_DIRECTORY_NAMES[experiment_relative.parts[0]]
+            ).joinpath(*experiment_relative.parts[1:])
         return str(LEGACY_EXPERIMENT_RECORD_ROOT / experiment_relative)
     resolved = path.resolve()
     try:
@@ -463,7 +491,11 @@ def inspect_variants() -> Sequence[Dict[str, Any]]:
     reference_signature = None
     reference_parameters = None
     for specification in VARIANTS:
-        run_dir = EXPERIMENT_ROOT / str(specification["experiment_dir"])
+        run_dir = (
+            FULL_RUN_DIR
+            if specification.get("canonical_run") == "evuav_full"
+            else EXPERIMENT_ROOT / str(specification["experiment_dir"])
+        )
         checkpoint_path = run_dir / "best_iou_seed37.pt"
         config_path = run_dir / "train_config.yaml"
         checkpoint_sha = require_sha256(
@@ -528,8 +560,14 @@ def inspect_variants() -> Sequence[Dict[str, Any]]:
                     "use_spatial_window_context": bool(
                         grid_config.get("use_spatial_window_context")
                     ),
-                    "input_encoder": "coordinate_mlp",
-                    "window_encoder": "sparse_conv",
+                    # 保留不可变锁的历史字段结构；这里记录的是已完成实验
+                    # 的配置快照，不随核心模型代码的收口而改写。
+                    "use_sparse_conv_encoder": bool(
+                        grid_config.get("use_sparse_conv_encoder")
+                    ),
+                    "use_ts_embedding": bool(
+                        grid_config.get("use_ts_embedding")
+                    ),
                     "use_stream_mamba_checkpoint": bool(
                         grid_config.get("use_stream_mamba_checkpoint", True)
                     ),

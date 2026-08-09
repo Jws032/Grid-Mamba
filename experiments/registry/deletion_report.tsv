@@ -1,10 +1,10 @@
 classification	deleted_path	bytes	retained_copy_or_reason
-duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W50_FULL	245583809	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W50_FULL
-duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W100_FULL	245588301	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W100_FULL
-duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W200_FULL	245590733	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W200_FULL
-duplicate	save_model/grid_mamba/ablation_window_size_curve_rerun2/SC12_GS_G4_FINE_LOW_MID_W300_FULL	245587770	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W300_FULL
-duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W800_FULL	245587004	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W800_FULL
-duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W1600_FULL	245585435	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W1600_FULL
+duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W50_FULL	245583809	experiments/runs/evuav/window_size/formal/W050
+duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W100_FULL	245588301	experiments/runs/evuav/window_size/formal/W100
+duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W200_FULL	245590733	experiments/runs/evuav/window_size/formal/W200
+duplicate	save_model/grid_mamba/ablation_window_size_curve_rerun2/SC12_GS_G4_FINE_LOW_MID_W300_FULL	245587770	experiments/runs/evuav/window_size/formal/W300
+duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W800_FULL	245587004	experiments/runs/evuav/window_size/formal/W800
+duplicate	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W1600_FULL	245585435	experiments/runs/evuav/window_size/formal/W1600
 duplicate	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID	1304628228	experiments/runs/evuav/baseline/FULL_SC12
 failed	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W500_FULL	15396	interrupted with no checkpoint or summary
 failed	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W600_FULL	8151	no checkpoint or summary
@@ -18,4 +18,25 @@ smoke	outputs/runtime/evuav_window_scaled_temporal_hierarchy_runtime_v1/w300/smo
 smoke	outputs/runtime/evuav_window_scaled_temporal_hierarchy_runtime_v1/w400/smoke	47843	explicit smoke output
 smoke	outputs/runtime/evuav_window_scaled_temporal_hierarchy_runtime_v1/w800/smoke	46907	explicit smoke output
 smoke	outputs/runtime/evuav_window_scaled_temporal_hierarchy_runtime_v1/w1600/smoke	46407	explicit smoke output
-total	-	2781090714	approximately 2.78 GB
+subtotal_first_pass	-	2781090714	approximately 2.78 GB
+archive	experiments/archive_pending	2084870261	user-authorized removal of all superseded, diagnostic, legacy Runtime, and MLflow assets
+archive	tools/archive	24004	user-authorized removal of all archived tools
+stale_manifest	artifacts/ev_flying_ef53_50ms.yaml	1468	backing EF53 diagnostic archive deleted
+stale_manifest	artifacts/ev_flying_ef54_25ms_runtime.yaml	1965	backing EF54 diagnostic archive deleted
+legacy_alias	mlruns	0	target archive deleted
+subtotal_before_analysis	-	4865988412	approximately 4.87 GB
+development_analysis	experiments/analysis/denoise	339084	completed denoise audit; user-authorized permanent deletion
+development_analysis	experiments/analysis/stage_features	164054595	paper uses a separate self-contained Fisher/LDA pipeline
+development_analysis	experiments/analysis/ts_score_diagnostic	2197459207	generating tool and model scoring branch already removed
+development_analysis	experiments/runs/evuav/baseline/FULL_SC12/inference_strategy	458991991	development inference-strategy study not adopted by paper
+nonselected_swc	experiments/analysis/swc_temporal excluding evuav/test_020_w09_15	523278380	retained source hashes match the paper source manifest
+development_tool	tools/analysis/ev_flying/analyze_ev_flying_denoise.py	36044	corresponding analysis completed and removed
+development_tool	tools/analysis/evuav/run_inference_strategy_ablation.py	23442	corresponding study not adopted by paper
+legacy_alias	experiments/analysis top-level aliases	0	all six analysis and Runtime aliases removed
+subtotal_before_artifact_cleanup	-	8210171155	approximately 8.21 GB
+unused_comparison_bundle	artifacts/evuav_instance_comparison	20077	no formal outputs; hard-coded legacy-server comparison workflow
+nonselected_visualization_bundle	artifacts/evuav_track_visualization	3534686	paper-selected test_014 is self-contained under the frozen latex project
+subtotal_before_dependency_cleanup	-	8213725918	approximately 8.21 GB
+local_dependency_cache	whl	447381114	binary compatibility recorded in docs/环境依赖版本记录.md
+unused_analysis_tool	tools/analysis/ev_flying/visualize_ev_flying_fail_cases.py	16076	no retained generated assets; user-authorized deletion
+total	-	8661123108	approximately 8.66 GB

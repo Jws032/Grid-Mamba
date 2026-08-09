@@ -11,6 +11,27 @@ _LEGACY_WINDOW_ROOT = Path("save_model/grid_mamba/ablation_window_size")
 _CANONICAL_WINDOW_ROOT = (
     EXPERIMENTS_ROOT / "runs" / "evuav" / "window_size" / "formal"
 )
+_CANONICAL_EVUAV_FULL_RUN = (
+    EXPERIMENTS_ROOT / "runs" / "evuav" / "baseline" / "FULL_SC12"
+)
+_EVUAV_FULL_EXPERIMENT_ID = "SC12_GS_G4_FINE_LOW_MID"
+_RENAMED_WINDOW_RUNS = {
+    "SC12_GS_G4_FINE_LOW_MID_W25_FULL": "W025",
+    "SC12_GS_G4_FINE_LOW_MID_W50_FULL": "W050",
+    "SC12_GS_G4_FINE_LOW_MID_W100_FULL": "W100",
+    "SC12_GS_G4_FINE_LOW_MID_W200_FULL": "W200",
+    "SC12_GS_G4_FINE_LOW_MID_W300_FULL": "W300",
+    "SC12_GS_G4_FINE_LOW_MID_W800_FULL": "W800",
+    "SC12_GS_G4_FINE_LOW_MID_W1600_FULL": "W1600",
+}
+_REMOVED_FULL_ALIASES = (
+    _CANONICAL_WINDOW_ROOT / _EVUAV_FULL_EXPERIMENT_ID,
+    EXPERIMENTS_ROOT
+    / "runs"
+    / "evuav"
+    / "baseline"
+    / _EVUAV_FULL_EXPERIMENT_ID,
+)
 _LEGACY_DATASET_ROOTS = {
     Path("dataset/EV-UAV-dataset"): WORKSPACE_ROOT / "datasets" / "EV-UAV",
     Path("dataset/Ev-Flying-processed"): WORKSPACE_ROOT
@@ -45,9 +66,30 @@ def resolve_recorded_path(recorded_path: str) -> Path:
     if not recorded.is_absolute():
         if _is_within(recorded, _LEGACY_WINDOW_ROOT):
             relative = recorded.relative_to(_LEGACY_WINDOW_ROOT)
-            candidate = _CANONICAL_WINDOW_ROOT / relative
+            if relative.parts and relative.parts[0] == _EVUAV_FULL_EXPERIMENT_ID:
+                candidate = _CANONICAL_EVUAV_FULL_RUN.joinpath(*relative.parts[1:])
+            elif relative.parts and relative.parts[0] in _RENAMED_WINDOW_RUNS:
+                candidate = _CANONICAL_WINDOW_ROOT.joinpath(
+                    _RENAMED_WINDOW_RUNS[relative.parts[0]],
+                    *relative.parts[1:],
+                )
+            else:
+                candidate = _CANONICAL_WINDOW_ROOT / relative
         else:
             candidate = GRID_MAMBA_ROOT / recorded
+            for removed_alias in _REMOVED_FULL_ALIASES:
+                if _is_within(candidate, removed_alias):
+                    relative = candidate.relative_to(removed_alias)
+                    candidate = _CANONICAL_EVUAV_FULL_RUN / relative
+                    break
+            for old_name, canonical_name in _RENAMED_WINDOW_RUNS.items():
+                removed_alias = _CANONICAL_WINDOW_ROOT / old_name
+                if _is_within(candidate, removed_alias):
+                    relative = candidate.relative_to(removed_alias)
+                    candidate = (
+                        _CANONICAL_WINDOW_ROOT / canonical_name / relative
+                    )
+                    break
             for legacy_root, canonical_root in _LEGACY_DATASET_ROOTS.items():
                 if _is_within(recorded, legacy_root):
                     relative = recorded.relative_to(legacy_root)

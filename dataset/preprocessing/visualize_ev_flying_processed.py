@@ -29,7 +29,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output-dir",
-        default="visualization/ev_flying_processed",
+        default="experiments/figures/generated/ev_flying_processed",
         help="Directory for output png files.",
     )
     parser.add_argument(

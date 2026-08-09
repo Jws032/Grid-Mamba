@@ -86,7 +86,7 @@ Position-aligned context injection 没有独立开关；只要启用 SWC，conte
 | `CP05` | 两种 propagation mechanism 同时启用 | `MC06` | FULL 别名 |
 
 CP04 的论文正式结果固定来自
-`Grid_Mamba/experiments/runs/evuav/ablation/hlc2/CP04/summary.json`：
+`Grid_Mamba/experiments/runs/evuav/ablation/hlc2/CP/CP04/summary.json`：
 `best_loss`、threshold `0.72`、IoU `89.96%`、ACC `94.35%`、
 $P_d$ `94.63%`、$F_a$ `43.01\times10^{-4}`。原 CP04 结果仅作为历史记录保留，
 不再用于论文报告。
@@ -127,18 +127,13 @@ CS 组不统计 Runtime。
 ## 不在本执行器中的实验
 
 - Window Size：已经在“Grid Mamba 时间窗口调整”中完成。本执行器不注册
-  `WSxx`，不读取、不修改、不迁移原精度结果。Runtime 由独立的
-  `tools/archive/runtime_legacy/run_window_size_runtime.py`
-  按论文最终选定的七个模型来源统计。该协议现作为论文时期的历史实现保留。
+  `WSxx`，不读取、不修改、不迁移原精度结果。当前锁定的窗口 Runtime 由
+  `tools/runtime/evuav_window/` 维护；论文时期旧整样本 Runtime 入口和归档
+  实体已在项目整理中删除，不改写论文已记录数值。
 
 ```bash
-# 只准备七个 Window Size Runtime 清单，不执行 profiling
-python -m tools.archive.runtime_legacy.run_window_size_runtime \
-  --all --stage prepare
-
-# 后续真正执行 Runtime
-python -m tools.archive.runtime_legacy.run_window_size_runtime \
-  --all --stage runtime --continue-on-error
+# 校验七个正式 Window Size Runtime 资产，不执行 GPU 推理
+python -m tools.runtime.evuav_window.run_evuav_window_size_runtime preflight all
 ```
 
 - Multi-scale 具体尺度值敏感性：暂时只保留 `SVxx` 编号前缀，待确定具体

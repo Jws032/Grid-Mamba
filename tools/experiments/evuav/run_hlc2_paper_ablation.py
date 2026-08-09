@@ -2,9 +2,9 @@
 """Prepare and run the formal HLC2 paper ablation study.
 
 The only configuration source of truth is the trained FULL run at
-SC12_GS_G4_FINE_LOW_MID.  This file deliberately keeps the formal paper
-registry separate from the development-stage registry in run_ablation.py,
-while reusing its train/test/evaluation pipeline helpers.
+SC12_GS_G4_FINE_LOW_MID.  This file owns the formal paper registry while
+reusing the registry-free train/test/evaluation pipeline helpers in
+run_ablation.py.
 
 Accuracy pipeline stages are config -> train -> test -> eval -> summarize.
 Runtime is an independent stage and is never included implicitly in ``all``.
@@ -407,7 +407,7 @@ def validate_generated_config(
         raise RuntimeError(f"{experiment_id} must retain the FULL 50-epoch schedule")
 
 
-# Configure the imported development runner as a stateless execution backend.
+# Configure the shared runner as a stateless execution backend.
 # These assignments affect only this Python process and do not modify its file.
 _CORE_BUILD_TRAIN_CONFIG = core.build_train_config
 core.FULL_GRID_MAMBA = {}
@@ -452,7 +452,20 @@ core.build_train_config = build_formal_train_config
 def canonical_dir(output_root: Path, canonical_id: str, smoke: bool = False) -> Path:
     if canonical_id == FULL_LOGICAL_ID:
         return FULL_RUN_DIR
-    return core.experiment_dir(output_root, canonical_id, smoke)
+    group = str(CANONICAL_EXPERIMENTS[canonical_id]["group"])
+    return core.experiment_dir(output_root / group, canonical_id, smoke)
+
+
+def canonical_execution_args(
+    args: argparse.Namespace,
+    canonical_id: str,
+) -> argparse.Namespace:
+    """Give the shared engine the canonical HLC2 group as its output root."""
+
+    configured = copy.copy(args)
+    group = str(CANONICAL_EXPERIMENTS[canonical_id]["group"])
+    configured.output_root = args.output_root / group
+    return configured
 
 
 def required_stage_artifacts(run_dir: Path, stage: str) -> List[Path]:
@@ -1012,7 +1025,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     print(f"[{canonical_id}] reusing completed canonical output: {run_dir}")
                     result = reused_success_record(args, canonical_id, run_dir)
                 else:
-                    result = core.run_experiment(args, canonical_id)
+                    result = core.run_experiment(
+                        canonical_execution_args(args, canonical_id),
+                        canonical_id,
+                    )
             canonical_results[canonical_id] = result
         except core.ExperimentRunFailed as exc:
             canonical_results[canonical_id] = exc.failure

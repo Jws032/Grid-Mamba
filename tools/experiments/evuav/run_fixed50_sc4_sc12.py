@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rerun selected sparse-conv ablations for exactly 50 epochs."""
+"""Reproduce the retained 50-epoch EVUAV FULL_SC12 baseline."""
 
 from __future__ import annotations
 
@@ -33,14 +33,6 @@ CHECKPOINTS = {
     "best_loss": "best_loss_seed37.pt",
 }
 EXPERIMENTS: Dict[str, Dict[str, Any]] = {
-    "SC4": {
-        "name": "sparse_conv_gdsc_v1_1_1_d1_2_3_4_se",
-        "voxel_size": [1.0, 1.0, 1.0],
-    },
-    "SC12": {
-        "name": "sparse_conv_gdsc_v1_1_4_d1_2_3_4_se",
-        "voxel_size": [1.0, 1.0, 4.0],
-    },
     "SC12_GS_G4_FINE_LOW_MID": {
         "name": "sparse_conv_gdsc_v1_1_4_d1_2_3_4_se_gs_g4_fine_low_mid",
         "group": "grid_spatial_stride",

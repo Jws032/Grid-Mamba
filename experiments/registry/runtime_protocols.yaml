@@ -13,11 +13,6 @@ protocols:
     path: experiments/runs/evuav/runtime/causal_window_v1
     note: Window-scaled temporal hierarchy runtime assets; smoke outputs removed.
 
-  evuav_full_sample_legacy:
-    status: legacy
-    path: experiments/archive_pending/legacy_runtime/window_size_full_sample
-    note: Kept separate from the paper-adopted runtime protocol.
-
   ev_flying_baseline_common_v1:
     status: canonical
     path: experiments/runs/ev_flying/runtime/baseline_common_v1

@@ -49,8 +49,10 @@ DEFAULT_CONFIG = DEFAULT_RUN_DIR / "train_config.yaml"
 DEFAULT_CHECKPOINT = DEFAULT_RUN_DIR / "best_loss_seed37.pt"
 DEFAULT_SAMPLE = REPO_ROOT.parent / "datasets/EV-UAV/test/test_020.npz"
 DEFAULT_OUTPUT_DIR = (
-    REPO_ROOT / "experiments/analysis/swc_temporal/evuav/test_020_w11_15"
+    REPO_ROOT / "experiments/analysis/swc_temporal/evuav/test_020_w09_15"
 )
+DEFAULT_START_WINDOW = 9
+DEFAULT_NUM_WINDOWS = 7
 OUTPUT_FILES = (
     "swc_temporal_main.png",
     "swc_temporal_main.pdf",
@@ -84,8 +86,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT))
     parser.add_argument("--sample", default=str(DEFAULT_SAMPLE))
-    parser.add_argument("--start-window", type=int, default=11)
-    parser.add_argument("--num-windows", type=int, default=5)
+    parser.add_argument("--start-window", type=int, default=DEFAULT_START_WINDOW)
+    parser.add_argument("--num-windows", type=int, default=DEFAULT_NUM_WINDOWS)
     parser.add_argument("--threshold", type=float, default=0.41)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))

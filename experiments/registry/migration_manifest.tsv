@@ -2,8 +2,15 @@ action	classification	source	destination_or_retained_copy	reason
 move	canonical	save_model/grid_mamba/ablation_sparse_conv/SC12_GS_G4_FINE_LOW_MID	experiments/runs/evuav/baseline/FULL_SC12	canonical full model
 move	canonical	save_model/grid_mamba/hlc2_paper_ablation	experiments/runs/evuav/ablation/hlc2	formal HLC2 ablation
 archive	superseded	experiments/runs/evuav/ablation/hlc2/CP04	experiments/archive_pending/superseded_runs/hlc2/CP04_original	CP04 original replaced by rerun1
-move	canonical	save_model/grid_mamba/hlc2_paper_ablation_cp04_rerun1/CP04	experiments/runs/evuav/ablation/hlc2/CP04	paper-selected CP04 rerun1
+move	canonical	save_model/grid_mamba/hlc2_paper_ablation_cp04_rerun1/CP04	experiments/runs/evuav/ablation/hlc2/CP/CP04	paper-selected CP04 rerun1
 move	canonical	save_model/grid_mamba/ablation_window_size	experiments/runs/evuav/window_size/formal	assembled paper-selected window runs
+move	canonical	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W25_FULL	experiments/runs/evuav/window_size/formal/W025	canonical short directory for W25
+move	canonical	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W50_FULL	experiments/runs/evuav/window_size/formal/W050	canonical short directory for W50
+move	canonical	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W100_FULL	experiments/runs/evuav/window_size/formal/W100	canonical short directory for W100
+move	canonical	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W200_FULL	experiments/runs/evuav/window_size/formal/W200	canonical short directory for W200
+move	canonical	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W300_FULL	experiments/runs/evuav/window_size/formal/W300	canonical short directory for W300
+move	canonical	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W800_FULL	experiments/runs/evuav/window_size/formal/W800	canonical short directory for W800
+move	canonical	experiments/runs/evuav/window_size/formal/SC12_GS_G4_FINE_LOW_MID_W1600_FULL	experiments/runs/evuav/window_size/formal/W1600	canonical short directory for W1600
 archive	superseded	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W300_FULL	experiments/archive_pending/superseded_runs/window_size/W300_original	W300 replaced by rerun2
 archive	superseded	save_model/grid_mamba/ablation_window_size_curve_rerun1	experiments/archive_pending/superseded_runs/window_size/rerun1	W50/W300 rerun1 not selected
 archive	superseded	save_model/grid_mamba/ablation_window_size_curve/SC12_GS_G4_FINE_LOW_MID_W400_FULL	experiments/archive_pending/superseded_runs/window_size/W400_curve	paper W400 uses full baseline
@@ -32,3 +39,20 @@ delete	failed	ablation_window_size_curve/W600	-none-	no checkpoint or summary
 delete	smoke	analysis_outputs/evuav_stage_features/background_calibration_val_smoke	-none-	explicit smoke output
 delete	smoke	analysis_outputs/evuav_runtime_v1/grid_mamba_smoke	-none-	explicit smoke output
 delete	smoke	outputs/runtime/evuav_window_scaled_temporal_hierarchy_runtime_v1/*/smoke	-none-	eight explicit smoke outputs
+delete	archive	experiments/archive_pending	-none-	all archived experiment assets explicitly approved for deletion
+delete	archive	tools/archive	-none-	all archived tools explicitly approved for deletion
+delete	stale_manifest	artifacts/ev_flying_ef53_50ms.yaml	-none-	backing EF53 diagnostic archive deleted
+delete	stale_manifest	artifacts/ev_flying_ef54_25ms_runtime.yaml	-none-	backing EF54 diagnostic archive deleted
+delete	legacy_alias	mlruns	-none-	target archive deleted
+delete	development_analysis	experiments/analysis/denoise	-none-	completed denoise audit; explicitly approved for deletion
+delete	development_analysis	experiments/analysis/stage_features	-none-	paper has an independent self-contained Fisher/LDA pipeline
+delete	development_analysis	experiments/analysis/ts_score_diagnostic	-none-	unused scoring branch and generator already removed
+delete	development_analysis	experiments/runs/evuav/baseline/FULL_SC12/inference_strategy	-none-	development post-processing study not adopted by paper
+delete	nonselected_swc	experiments/analysis/swc_temporal/*	experiments/analysis/swc_temporal/evuav/test_020_w09_15	retain only source matching the frozen paper manifest
+delete	development_tool	tools/analysis/ev_flying/analyze_ev_flying_denoise.py	-none-	corresponding analysis completed and removed
+delete	development_tool	tools/analysis/evuav/run_inference_strategy_ablation.py	-none-	corresponding study not adopted by paper
+delete	legacy_alias	experiments/analysis top-level aliases	-none-	six analysis and Runtime aliases removed after canonical paths were verified
+delete	unused_comparison_bundle	artifacts/evuav_instance_comparison	-none-	legacy-server workflow produced no retained formal outputs
+delete	nonselected_visualization_bundle	artifacts/evuav_track_visualization	../latex/figures/instance_segmentation_discussion/evuav_track_visualization	paper-selected test_014 inputs and renderer are self-contained in the frozen paper project
+delete	local_dependency_cache	whl	docs/环境依赖版本记录.md	installed environment compatibility recorded before deleting ignored local wheel cache
+delete	unused_analysis_tool	tools/analysis/ev_flying/visualize_ev_flying_fail_cases.py	-none-	no retained generated assets; explicitly approved for deletion

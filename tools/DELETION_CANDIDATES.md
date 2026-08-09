@@ -4,49 +4,32 @@
 脚本完全相同的源文件，因此删除属于实验来源保留策略，而不是简单的重复
 文件清理。
 
-## 经确认后可优先删除
+## 已执行删除
 
-### `archive/ablation_development/`
-
-依赖废弃模型分支的 4 个执行器已经随核心代码收口删除。目前剩余 2 个
-窗口实验执行器：
-
-- 早期窗口缩放变体；
-- 未被选中的 50 ms 无重叠变体。
-
-删除该目录不会删除正式 checkpoint，也不会影响正式 HLC2、窗口大小、
-EV-Flying 或 FRED 执行器。但删除后将无法按原注册表精确复现这些探索性
-实验。
-
-### `archive/stage_feature_candidates/`
-
-其中 14 个脚本用于前期特征提取、校准、验证和多种候选图渲染。论文最终
-阶段特征图已经在 `../latex/figures/stage_feature_analysis/` 下拥有独立
-流水线。
-
-这些脚本互相导入，若决定删除，应整目录删除。已有分析结果仍保存在
-`experiments/analysis/stage_features/`。
-
-## 条件删除候选
-
-### `archive/runtime_legacy/run_window_size_runtime.py`
-
-旧版整样本 Runtime 资产已经保存在
-`experiments/archive_pending/legacy_runtime/`。删除脚本不会影响已记录数值，
-但会失去按论文时期协议重新执行 Runtime 的入口。当前因果窗口 Runtime
-不依赖该脚本。
-
-由于此前已经明确要求保留论文 Runtime 协议，默认建议继续保留该脚本；
-只有决定采用“仅保留结果资产”的归档方式时再删除。
+- `archive/`：论文时期旧版 Runtime 入口已于 2026-08-09 按确认整目录删除；
+  对应 `experiments/archive_pending/` 旧协议资产也已删除。当前锁定 Runtime
+  入口和论文已记录数值不受影响。
+- `archive/ablation_development/`：剩余 2 个未被正式采用的窗口实验执行器，
+  已于 2026-08-09 按确认整目录删除；正式消融入口和结果资产不受影响。
+- `archive/stage_feature_candidates/`：前期阶段特征提取、校准和候选渲染
+  流水线，已于 2026-08-09 按确认整目录删除；论文最终自包含流水线保留。
+- `runtime/complexity/`：未形成正式结果资产，也未被活动入口、测试或论文引用；
+  已于 2026-08-09 按确认删除。
+- `analysis/ev_flying/analyze_ev_flying_denoise.py`：去噪数据质量分析已经完成且
+  不再使用；对应 `experiments/analysis/denoise/` 已于 2026-08-09 一并删除。
+- `analysis/evuav/run_inference_strategy_ablation.py`：开发期推理策略消融未进入
+  论文；对应 `FULL_SC12/inference_strategy/` 已于 2026-08-09 一并删除。
+- `analysis/ev_flying/visualize_ev_flying_fail_cases.py`：未形成已保留的生成资产，
+  已于 2026-08-09 按确认删除。
 
 ## 暂时不要删除
 
 - `experiments/`：正式训练与消融实验入口。
 - `runtime/evuav_window/`：当前锁定的 Runtime 协议及 W25 补充实验。
 - `runtime/dataset/`：Grid_Mamba 数据集级 Runtime 工具。
-- `runtime/complexity/`：当前模型的复杂度分析工具。
 - `evaluation/tracking/`：唯一的轨迹与实例评测链。
-- `analysis/`：仍可复用的诊断和可视化工具。
+- `analysis/evuav/visualize_evuav_swc_temporal.py`：保留论文 SWC 数据生成能力，
+  默认生成正式样例 `test_020_w09_15` 的第 9 至 15 个窗口。
 - `tests/tools/runtime/`：用于保护 Runtime 协议和迁移路径。
 - `_paths.py`：在不修改历史清单原文的情况下解析当前规范资产路径。
 

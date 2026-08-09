@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 
 if __package__ is None or __package__ == "":
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from dataset.filter_ev_flying_hot_pixels import denoise_events
+from dataset.preprocessing.filter_ev_flying_hot_pixels import denoise_events
 
 
 CLASS_NAMES = {

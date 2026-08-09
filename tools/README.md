@@ -11,15 +11,18 @@ python -m tools.runtime.evuav_window.run_evuav_window_size_runtime preflight all
 ## 活动工具分组
 
 - `experiments/`：训练与消融实验入口。其中
-  `core/run_ablation.py` 是各数据集实验注册表共用的基础执行器。
-- `runtime/`：数据集级运行时间评测、EVUAV 因果窗口 Runtime、FRED
-  适配器及复杂度分析工具。
+  `core/run_ablation.py` 是无内置实验表的公共执行引擎，由各正式入口注入
+  自己的注册表。
+- `runtime/`：数据集级运行时间评测、EVUAV 因果窗口 Runtime 及 FRED
+  适配器。
 - `evaluation/tracking/`：EVUAV 轨迹构建、参数搜索和实例级指标评测。
-- `analysis/`：不定义正式训练结果的诊断与可视化分析工具。
-- `archive/`：历史开发消融、旧版 Runtime 协议和阶段特征候选可视化。
+- `analysis/`：保留正式 SWC 数据生成工具，不定义正式训练结果。
 
 Runtime 测试位于 `tests/tools/runtime/`。自动生成的 `__pycache__` 不属于
 实验资产，不应保留。
+
+论文时期的旧版 Runtime、去噪分析和未采用的推理策略分析工具已经删除；
+完整删除依据和范围见 `DELETION_CANDIDATES.md`。
 
 ## 实验资产路径
 
